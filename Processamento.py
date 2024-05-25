@@ -1,19 +1,16 @@
 from math import atan, degrees
-from tkinter import filedialog as dlg, messagebox as mbox
-from tkinter import simpledialog
-import tkinter as tk
+from tkinter import filedialog as dlg
 import cv2
 import numpy as np
 import pandas as pd
 import os
 import math
-import imutils
 from openpyxl import Workbook  # pip install openpyxl
 from openpyxl import load_workbook
 from skimage.measure import label, regionprops_table
 from skimage.transform import resize
 from skimage.measure import find_contours
-from skimage.color import rgb2ycbcr, rgb2hsv
+from skimage.color import rgb2hsv
 from skimage.morphology import disk
 from skimage.filters import median
 from scipy.optimize import curve_fit  # Lib p/ fazer ajuste polinomial
@@ -25,6 +22,9 @@ from pathlib import Path
 # ! No need to use _root for anything at all
 # __root = Tk()
 
+# Esta função ajusta as dimensões de uma imagem para garantir que ela
+# não exceda 1800 pixels em largura ou altura, mantendo a proporção.
+# im > imagem de entrada
 def adjustImageDimension(im):
     tLines, tColumns, c = im.shape
     if tLines > tColumns:
@@ -38,6 +38,14 @@ def adjustImageDimension(im):
     return (tLines, tColumns, rFactor)
 
 
+# Esta função desenha linhas na imagem com base em coordenadas fornecidas para linhas
+# de calibração, temporárias e de elementos.
+# variaveis: image -> imagem na qual as linhas serão desenhadas
+# calibrationLine -> coordenadas da linha de calibração
+# temLines -> lista de coordenadas para linhas temp
+# elementLines -> lista de coordenadas para linhas de elementos
+# totalColumns -> numero total de colunas a srem desenhadas
+# totalLines -> numero total de linhas a serem desenhadas
 def drawLines(image, calibrationLine, tempLines, elementLines, totalColumns, totalLines):
     if len(calibrationLine) > 0:
         xi, yi, c = calibrationLine[0]
@@ -61,7 +69,12 @@ def drawLines(image, calibrationLine, tempLines, elementLines, totalColumns, tot
     return (image)
 
 
-def subImagens(elementos, img, tColumns, tLines, factor, pixFactor, dFactor, nomeArquivo):
+# Essa função extrai sub-imagens de uma imagem maior com base
+# em linhas temporárias e de elementos.
+# variaveis: image -> imagem da qual as subimagens serão extraidas
+# temLines -> lista de coordenadas para linhas temp
+# elementLines -> lista de coordenadas para linhas de elementos
+def subImagens(img, tColumns, tLines, factor, pixFactor, dFactor, nomeArquivo):
     imgProcess = img.copy()
     proceed = False
     global __path_file_name
@@ -71,7 +84,7 @@ def subImagens(elementos, img, tColumns, tLines, factor, pixFactor, dFactor, nom
     # Create a new results directory because it does not exist
     print('Create a new results directory because it does not exist')
     check_and_create_directory_if_not_exist(results_folder_path)
-    while proceed == False:
+    while proceed is False:
         if nomeArquivo == '':
             new_file_name = dlg.asksaveasfilename(confirmoverwrite=False, initialdir=results_folder_path)
             __path_file_name = Path(new_file_name)
@@ -107,8 +120,8 @@ def subImagens(elementos, img, tColumns, tLines, factor, pixFactor, dFactor, nom
     # Now creating the report file itself with its reference
     arqRelatorio = open(nomeRelatorio, 'at')
 
-    linhas = []
-    colunas = []
+    # linhas = []
+    # colunas = []
     '''
     for i in elementos:
         pos, n = i
@@ -120,29 +133,31 @@ def subImagens(elementos, img, tColumns, tLines, factor, pixFactor, dFactor, nom
     colunas.sort()
     '''
 
-    posEggs=findeggs(img)
+    posEggs = findeggs(img)
     nFile = 1
-    lMin = cMin = +9999
-    lMax = cMax = -9999
+    lMin = cMin = + 9999
+    lMax = cMax = - 9999
 
     for egg in posEggs:
-        (gr, ll, col, lin, larg, alt)=egg
+        (gr, ll, col, lin, larg, alt) = egg
 
-        lIni = int(lin-round(alt*0.075))
-        lFin = int(lin+round(alt*1.075))
-        cIni = int(col-round(larg*0.075))
-        cFin = int(col+round(larg * 1.075))
+        lIni = int(lin - round(alt * 0.075))
+        lFin = int(lin + round(alt * 1.075))
+        cIni = int(col - round(larg * 0.075))
+        cFin = int(col + round(larg * 1.075))
 
-        if (lIni < lMin) : lMin = lIni
-        if (cIni < cMin) : cMin = cIni
-        if (lFin > lMax) : lMax = lFin
-        if (cFin > cMax) : cMax = cFin
-
+        if (lIni < lMin):
+            lMin = lIni
+        if (cIni < cMin):
+            cMin = cIni
+        if (lFin > lMax):
+            lMax = lFin
+        if (cFin > cMax):
+            cMax = cFin
 
         recImage = imgProcess[lIni:lFin, cIni:cFin]
 
         # Daqui em diante eu acho que dá para ser paralelizado.....
-
         # Criar pasta do ovo para gráficos
         egg_num = str(nFile)
         egg_folder_fit_plot_path = Path(plot_results_path, egg_num)
@@ -166,17 +181,15 @@ def subImagens(elementos, img, tColumns, tLines, factor, pixFactor, dFactor, nom
             termo1 = math.acos((b / 2) / (d)) * (d ** 2 / math.sqrt(d ** 2 - (b / 2) ** 2))
             termo2 = math.acos((b / 2) / c) * (c ** 2 / math.sqrt(c ** 2 - (b / 2) ** 2))
             vFormulaArea = 2 * math.pi * (b / 2) ** 2 + math.pi * (b / 2) * (termo1 + termo2)
-        except:
+        except ValueError:
             vFormulaArea = 1
-
         try:
             vFormulaVolume = (b / 2) ** 2 * ((2 * math.pi) / 3) * (d + c)
-        except:
+        except ValueError:
             vFormulaVolume = 1
 
         # nomeArquivo = rf'{__path_folder}/Processed/{__root_file_name}_{nFile}.png'
         # rotateFileName = rf'{__path_folder}/Processed/rotate_{__root_file_name}_{nFile}.png'
-
         processedImageName = Path(processed_path, f'{nFile}.png')
         rotateProcessedImageName = Path(processed_path, f'rotate_{nFile}.png')
 
@@ -187,10 +200,10 @@ def subImagens(elementos, img, tColumns, tLines, factor, pixFactor, dFactor, nom
         cv2.imwrite(str(processedImageName), imgProc)
         cv2.imwrite(str(rotateProcessedImageName), rotateImage)
 
-        #imgProcess[linhas[x]:linhas[x + 1], colunas[y]:colunas[y + 1]] = imgProc
+        # imgProcess[linhas[x]:linhas[x + 1], colunas[y]:colunas[y + 1]] = imgProc
         imgProcess[lIni:lFin, cIni:cFin] = imgProc
 
-        #entendo que aqui se encerra o trecho paralelizável....
+        # entendo que aqui se encerra o trecho paralelizável....
 
         down_points = (tColumns, tLines)
         dispImage = cv2.resize(imgProcess, down_points, interpolation=cv2.INTER_LINEAR)
@@ -204,8 +217,8 @@ def subImagens(elementos, img, tColumns, tLines, factor, pixFactor, dFactor, nom
     dispImage = cv2.resize(recImage, down_points, interpolation=cv2.INTER_LINEAR)
 
     # nomeArquivo = rf'{__path_folder}/Processed/{__root_file_name}_processado.png'
-    recImageName = Path(processed_path, f'{file_path_results.stem}_processado.png')
-    salvou = cv2.imwrite(str(recImageName), recImage)
+    # recImageName = Path(processed_path, f'{file_path_results.stem}_processado.png')
+    # salvou = cv2.imwrite(str(recImageName), recImage)
 
     # cv2.imshow("Window", dispImage)
     # cv2.waitKey(0)
@@ -218,11 +231,11 @@ def process(frame, factor, pixFactor):
     C = 0
     D = 0
 
-    # Create a copy to save the image at the original resolution.
+    # Uma cópia da imagem original é feita para preservar a imagem na resolução original.
     original = frame.copy()
     # original = cv2.cvtColor(original, cv2.COLOR_BGR2RGB)
 
-    # Reduce the image according to the factor to optimize the processing time
+    # A imagem é reduzida de acordo com um fator fornecido como argumento para otimizar o tempo de processamento.
     [lin, col, ch] = original.shape
     frame = resize(frame, [int(lin / factor), int(col / factor)])
     frame = np.uint8(frame * 255)
@@ -260,8 +273,8 @@ def process(frame, factor, pixFactor):
     data = np.bitwise_and(np.bitwise_and(np.bitwise_and(data[:, :, 0] >= channel1Min, data[:, :, 0] <= channel1Max),
                                          np.bitwise_and(data[:, :, 1] >= channel2Min, data[:, :, 1] <= channel2Max)),
                           np.bitwise_and(data[:, :, 2] >= channel3Min, data[:, :, 2] <= channel3Max))
-    data[data == True] = 1
-    data[data == False] = 0
+    data[data is True] = 1
+    data[data is False] = 0
 
     data = median(data, disk(3))
     data[data > 0] = 1
@@ -535,11 +548,14 @@ def disc_slices_curve_fit(x_data, y_data, polynomial_fit_degree_functions):
     # return [np.array(resultDiscSlices), resultCurveError]
     return [resultDiscSlices, resultCurveError]
 
+
+# função detecta ovos em uma imagem com base em certos critérios de área e proporção.
+# Ela retorna uma lista de ovos encontrados, onde cada ovo é representado por uma lista [grupo, linha, x, y, largura, altura]
 def findeggs(originalImg):
-    ovos=[]
-    linhas=[]
+    ovos = []
+    # linhas = []
     # Loading the image
-    (alt, larg, ch)=originalImg.shape;
+    (alt, larg, ch) = originalImg.shape
     AreaTotal = alt*larg
 
     # preprocess the image
@@ -556,7 +572,7 @@ def findeggs(originalImg):
     for i in range(1, totalLabels):
         # Area of the component
         area = values[i, cv2.CC_STAT_AREA]
-        percArea = (area*100)/AreaTotal
+        percArea = (area * 100)/AreaTotal
         aspectRatio = float(int(values[i, cv2.CC_STAT_HEIGHT]) / int(values[i, cv2.CC_STAT_WIDTH]))
 
         if (percArea > 0.4) and (percArea < 1) and (aspectRatio > 1.1) and (aspectRatio < 1.6):
@@ -565,33 +581,33 @@ def findeggs(originalImg):
             y = values[i, cv2.CC_STAT_TOP]
             w = values[i, cv2.CC_STAT_WIDTH]
             h = values[i, cv2.CC_STAT_HEIGHT]
-            elem=[0,lin,x,y,w,h]
-            ovos.append(elem);
+            elem = [0, lin, x, y, w, h]
+            ovos.append(elem)
 
-    posVet=0
-    grupo = 1;
-    #categoriza pela posição na linha, são classificados aquelas regiões cuja posição não linha variam abaixo de 10%
+    posVet = 0
+    grupo = 1
+    # categoriza pela posição na linha, são classificados aquelas regiões cuja posição não linha variam abaixo de 10%
     for i in range(posVet, len(ovos)):
-        if (ovos[i][0]==0):
-            ovos[i][0]=grupo
-            for k in range(i+1, len(ovos)):
-                if ((abs(ovos[k][1]-ovos[i][1])*100)/ovos[i][1])<10:
-                    ovos[k][0]=grupo
-            grupo=grupo+1
+        if (ovos[i][0] == 0):
+            ovos[i][0] = grupo
+            for k in range(i + 1, len(ovos)):
+                if ((abs(ovos[k][1] - ovos[i][1]) * 100)/ovos[i][1]) < 10:
+                    ovos[k][0] = grupo
+            grupo = grupo + 1
 
-    #ordena pela linha
-    for i in range(0, len(ovos)-1):
-        for j in range(i+1, len(ovos)):
-            if ovos[j][0]<ovos[i][0]:
-                troca=ovos[j]
-                ovos[j]=ovos[i]
-                ovos[i]=troca
+    # ordena pela linha
+    for i in range(0, len(ovos) - 1):
+        for j in range(i + 1, len(ovos)):
+            if ovos[j][0] < ovos[i][0]:
+                troca = ovos[j]
+                ovos[j] = ovos[i]
+                ovos[i] = troca
 
-    #ordena pela coluna
-    controle = 1
-    for i in range(0, len(ovos)-1):
+    # ordena pela coluna
+    # controle = 1
+    for i in range(0, len(ovos) - 1):
         for j in range(i+1, len(ovos)):
-            if ((ovos[j][0]==ovos[i][0]) and (ovos[j][2] < ovos[i][2])):
+            if ((ovos[j][0] == ovos[i][0]) and (ovos[j][2] < ovos[i][2])):
                 troca = ovos[j]
                 ovos[j] = ovos[i]
                 ovos[i] = troca
@@ -601,7 +617,7 @@ def findeggs(originalImg):
 
 """
 Representação da curva - Curva polinomial de grau 3
-A função deve receber as coordenadas X e Y de seus pontos de dados como entradas e retornar os valores Y previstos para cada valor X. 
+A função deve receber as coordenadas X e Y de seus pontos de dados como entradas e retornar os valores Y previstos para cada valor X.
 """
 
 
@@ -621,8 +637,8 @@ def polynomial_curv_9(x, a, b, c, d, e, f, g, h, i, j):
     return a * x ** 9 + b * x ** 8 + c * x ** 7 + d * x ** 6 + e * x ** 5 + f * x ** 4 + g * x ** 3 + h * x ** 2 + i * x + j
 
 
-def polynomial_curv_11(x, a, b, c, d, e, f, g, h, i, j, k, l):
-    return a * x ** 11 + b * x ** 10 + c * x ** 9 + d * x ** 8 + e * x ** 7 + f * x ** 6 + g * x ** 5 + h * x ** 4 + i * x ** 3 + j * x ** 2 + k * x + l
+def polynomial_curv_11(x, a, b, c, d, e, f, g, h, i, j, k, m):
+    return a * x ** 11 + b * x ** 10 + c * x ** 9 + d * x ** 8 + e * x ** 7 + f * x ** 6 + g * x ** 5 + h * x ** 4 + i * x ** 3 + j * x ** 2 + k * x + m
 
 
 def piecewise_linear(x, x0, y0, k1, k2):
@@ -660,10 +676,12 @@ def get_polynomial_curv_portuguese_name(polynomial_func):
         return "Ajuste desconhecido"
 
 
-# This function consists of the sum of three exponential functions with different amplitudes, centers, and widths, plus a constant d. You can adjust the initial parameter values to get a better fit.
+# This function consists of the sum of three exponential functions with different amplitudes,
+# centers, and widths, plus a constant d. You can adjust the initial parameter values to get a better fit.
 # def exponential_combo(x, a1, b1, c1, a2, b2, c2, a3, b3, c3, d):
-#     return a1 * np.exp(-((x - b1)/c1)**2) + a2 * np.exp(-((x - b2)/c2)**2) + a3 * np.exp(-((x - b3)/c3)**2) + d
-
+# return a1 * np.exp(-((x - b1)/c1)**2) + a2 * np.exp(-((x - b2)/c2)**2) + a3 * np.exp(-((x - b3)/c3)**2) + d
+# Esta função cria ou atualiza uma planilha Excel com os resultados do volume e os erros
+# de ajuste para diferentes tipos de ajuste polinomial
 def create_sheet(path_file_name, egg_name, volume_results, curve_fit_errors):
     ordem_valores = ["Antigo", polynomial_curv_3, polynomial_curv_5, polynomial_curv_7, polynomial_curv_9,
                      polynomial_curv_11]
@@ -702,7 +720,7 @@ def create_sheet(path_file_name, egg_name, volume_results, curve_fit_errors):
             file_worksheet = workbook[file_name]
 
         # Find / Create egg row
-        is_new_egg = False
+        # is_new_egg = False
         egg_row = 0
         for row in file_worksheet.iter_rows(min_col=1, max_col=1):
             for cell in row:
@@ -712,7 +730,7 @@ def create_sheet(path_file_name, egg_name, volume_results, curve_fit_errors):
             max_col_row = len([cell for cell in file_worksheet["A"] if cell.value])
             egg_row = max_col_row + 2
             file_worksheet[f"A{egg_row}"] = egg_name
-            is_new_egg = True
+            # is_new_egg = True
 
         current_min_col = 2
         for value_type in ordem_valores:
@@ -742,6 +760,8 @@ def check_and_create_directory_if_not_exist(path_directory):
     if not os.path.exists(path_directory):
         os.makedirs(path_directory)
         print(f"The path {path_directory} is created!")
+
+
 '''
 
 from math import atan, degrees
