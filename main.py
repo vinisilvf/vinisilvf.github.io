@@ -1,11 +1,8 @@
-from tkinter import *
-from tkinter import filedialog as dlg, messagebox as mbox
-import urllib.request
+from tkinter import Tk, Text, mainloop, Button
+from tkinter import filedialog as dlg
 import cv2
 import numpy as np
 import sys
-import time
-import os
 import Processamento
 
 # Lists to store the Lines coordinators
@@ -21,6 +18,7 @@ auxFactor = 1
 videoMode = -1
 
 
+# Esta função obtém o valor de entrada de um Text widget do tkinter
 def retrieve_input(textBox):
     global pixFactor
     inputValue = textBox.get("1.0", "end-1c")
@@ -28,6 +26,7 @@ def retrieve_input(textBox):
     pixFactor = int(inputValue)
 
 
+# Cria uma janela Tkinter para o usuário inserir um valor de referência em centímetros. O valor é capturado e usado para atualizar o pixFactor.
 def capture_distance():
     root = Tk()
     root.title('Informe referência em cm')
@@ -41,6 +40,8 @@ def capture_distance():
     root.destroy()
 
 
+# Esta função gerencia as ações do mouse na janela do OpenCV. Dependendo do tipo de ação do mouse (botão pressionado, liberado, movimento),
+# ela atualiza as listas de coordenadas para linhas e a linha de calibração.
 # function which will be called on mouse input
 def mouseActions(action, x, y, flags, *userdata):
     # Referencing global variables
@@ -58,18 +59,18 @@ def mouseActions(action, x, y, flags, *userdata):
     elif action == cv2.EVENT_LBUTTONUP:
         if clicked == 3:
             calibrationLine[1] = (x, y, clicked)
-            xi, yi, c = calibrationLine[0];
-            xf, yf, c = calibrationLine[1];
+            xi, yi, c = calibrationLine[0]
+            xf, yf, c = calibrationLine[1]
             calibrationLine = []
             clicked = 0
             try:
-                dX = xf * (1 / auxFactor) - xi * (1 / auxFactor);
-                dY = yf * (1 / auxFactor) - yi * (1 / auxFactor);
+                dX = xf * (1 / auxFactor) - xi * (1 / auxFactor)
+                dY = yf * (1 / auxFactor) - yi * (1 / auxFactor)
                 dFactor = (dX ** 2 + dY ** 2) ** 0.5
                 print(f'Medida em Pixel => {dFactor}')
                 capture_distance()
                 pixFactor = pixFactor / dFactor
-            except:
+            except ValueError:
                 pixFactor = 1
         else:
             elementLines.append((y, clicked))
@@ -92,6 +93,9 @@ def mouseActions(action, x, y, flags, *userdata):
                 tempLines = [(x, clicked)]
 
 
+# Esta função captura uma imagem de diferentes fontes: arquivo local, URL ou um arquivo específico.
+# A imagem é então ajustada para caber na tela e redimensionada. Retorna a imagem completa, a imagem redimensionada,
+# linhas e colunas totais, fator de redimensionamento e nome do arquivo.
 def captureImage(source):
     fileName = ''
     if (source == 1):
@@ -116,6 +120,8 @@ def captureImage(source):
 
 
 # Programa Principal
+# Ele inicializa a janela do OpenCV, define o callback do mouse, captura uma imagem inicial e entra em um loop onde:
+# Exibe a imagem e desenha as linhas nela. E Verifica as teclas pressionadas para executar diferentes ações.
 if sys.version_info[0] == 3:
     from urllib.request import urlopen
 else:
@@ -137,16 +143,16 @@ while True:
     cv2.imshow("Window", image)
     k = cv2.waitKey(1)
 
-    if (k == 113):  # 'q' pressed to quit the system
+    if (k == 113):  # 'q' sair do sistema
         break
 
-    if (k == 100):  # 'd' pressed to delete the last builded line
+    if (k == 100):  # 'd' deletar a última linha
         if len(elementLines) > 0:
             del elementLines[-1]
         tempLines = []
         clicked = 0
 
-    if (k == 112):  # 'p' pressed to activate the image processing
+    if (k == 112):  # 'p' ativar o processamento de imagem
         pixFactor = 0.25041736227045075125208681135225
         print("Nome Arquivo antes da chamada de processamento ==> ", nomeArquivo)
         Processamento.subImagens(elementLines, fullImage, totalColumns, totalLines, rFactor, pixFactor, dFactor, nomeArquivo)
@@ -154,20 +160,20 @@ while True:
         cv2.setMouseCallback("Window", mouseActions)
         fullImage, originalImage, totalLines, totalColumns, rFactor, nomeArquivo = captureImage(1)
 
-    if (k == 99):  # 'c' pressed to capture new image
+    if (k == 99):  # 'c' capturar uma nova imagem
         videoMode = -1
         fullImage, originalImage, totalLines, totalColumns, rFactor, nomeArquivo = captureImage(0)
 
-    if (k == 102):  # 'f' to read image from file
+    if (k == 102):  # 'f' ler imagem de arquivo
         fullImage, originalImage, totalLines, totalColumns, rFactor, nomeArquivo = captureImage(1)
 
-    if (k == 120):  # 'x' pressed to capture the calibration of pixFactor
+    if (k == 120):  # 'x' iniciar calibração pixFactor
         clicked = 3
         calibrationLine = []
-    if (k == 118):  # 'v' video mode pressed
+    if (k == 118):  # 'v' alternar modo de vídeo
         videoMode = videoMode * -1
 
-    if (k == 115):  # 's' Save the image into a file
+    if (k == 115):  # 's' salvar a imagem em um arquivo
         fileNameSave = dlg.asksaveasfilename(confirmoverwrite=False)
         if fileNameSave != '':
             cv2.imwrite(fileNameSave, fullImage)
@@ -176,7 +182,31 @@ cv2.destroyAllWindows()
 
 '''
 def subImagens(imagem):
-    imagens={1: [355, 65, 555, 220], 2: [365, 220, 555, 380], 3: [365, 380, 555, 545], 4: [365, 545, 555, 715], 5: [365, 715, 555, 895], 6: [365, 875, 555, 1055], 7: [555, 220, 770, 380], 8: [555, 220, 770, 380], 9: [555, 380, 770, 545], 10: [555, 545, 770, 715], 11: [555, 715, 770, 895], 12: [555, 875, 770, 1055], 13: [770, 380, 965, 545], 14: [770, 220, 965, 380], 15: [770, 380, 965, 545], 16: [770, 545, 965, 715], 17: [770, 715, 965, 895], 18: [770, 875, 965, 1055], 19: [965, 545, 1150, 715], 20: [965, 220, 1150, 380], 21: [965, 380, 1150, 545], 22: [965, 545, 1150, 715], 23: [965, 715, 1150, 895], 24: [965, 875, 1150, 1055]};
+    imagens = {
+        1: [355, 65, 555, 220],
+        2: [365, 220, 555, 380],
+        3: [365, 380, 555, 545],
+        4: [365, 545, 555, 715],
+        5: [365, 715, 555, 895],
+        6: [365, 875, 555, 1055],
+        7: [555, 220, 770, 380],
+        8: [555, 220, 770, 380],
+        9: [555, 380, 770, 545],
+        10: [555, 545, 770, 715],
+        11: [555, 715, 770, 895],
+        12: [555, 875, 770, 1055],
+        13: [770, 380, 965, 545],
+        14: [770, 220, 965, 380],
+        15: [770, 380, 965, 545],
+        16: [770, 545, 965, 715],
+        17: [770, 715, 965, 895],
+        18: [770, 875, 965, 1055],
+        19: [965, 545, 1150, 715],
+        20: [965, 220, 1150, 380],
+        21: [965, 380, 1150, 545],
+        22: [965, 545, 1150, 715],
+        23: [965, 715, 1150, 895],
+        24: [965, 875, 1150, 1055]};
     i=1;
     while True:
         recorte = imagens[i];
@@ -417,4 +447,3 @@ Trecho de código de tratamento da rede yolo
 #
 # #
 # cv2.destroyAllWindows()
-#
