@@ -1,9 +1,10 @@
-from tkinter import Tk, Text, mainloop, Button
-from tkinter import filedialog as dlg
+from tkinter import Tk, Text, mainloop, Button, Menu, filedialog as dlg, messagebox, Frame, Label, StringVar, Toplevel
 import cv2
 import numpy as np
 import sys
+import urlopen
 import Processamento
+import threading
 
 # Lists to store the Lines coordinators
 elementLines = []
@@ -16,33 +17,70 @@ pixFactor = 0.247525
 dFactor = 1
 auxFactor = 1
 videoMode = -1
+fullImage = None
+originalImage = None
+nomeArquivo = ""
+status_message = None
+opencv_running = False
+menu_active = False
 
+def show_interactive_menu():
+    """Cria e exibe o menu interativo de controle da imagem."""
+    menu = Toplevel()
+    menu.title("Opções de Imagem")
+    menu.geometry("250x150")
 
-# Esta função obtém o valor de entrada de um Text widget do tkinter
+    def delete_last_line():
+        global elementLines
+        if elementLines:
+            elementLines.pop()
+            update_image_cache() # Atualiza a imagem após deletar a linha
+
+    def save_image():
+        if fullImage is not None:
+            fileNameSave = dlg.asksaveasfilename(confirmoverwrite=False)
+            if fileNameSave:
+                cv2.imwrite(fileNameSave, fullImage)
+        menu.destroy()
+
+    def close_program():
+        global opencv_running
+        opencv_running = False
+        menu.destroy()
+        cv2.destroyAllWindows()
+
+    Button(menu, text="🖌️ Deletar Última Linha", command=delete_last_line).pack(pady=5, fill='x')
+    Button(menu, text="💾 Salvar Imagem", command=save_image).pack(pady=5, fill='x')
+    Button(menu, text="❌ Fechar", command=close_program).pack(pady=5, fill='x')
+
+    menu.mainloop()
+
+def update_image_cache():
+    """Atualiza a exibição da imagem no OpenCV com as alterações recentes."""
+    global originalImage
+    if originalImage is not None:
+        temp_image = originalImage.copy()
+        Processamento.drawLines(temp_image, calibrationLine, tempLines, elementLines, totalColumns, totalLines)
+        cv2.imshow("Window", temp_image)
+
 def retrieve_input(textBox):
     global pixFactor
     inputValue = textBox.get("1.0", "end-1c")
-    textBox.quit()
     pixFactor = int(inputValue)
+    status_message.set(f"Fator de pixel atualizado para {pixFactor}")
+    textBox.quit()
 
-
-# Cria uma janela Tkinter para o usuário inserir um valor de referência em centímetros. O valor é capturado e usado para atualizar o pixFactor.
 def capture_distance():
     root = Tk()
     root.title('Informe referência em cm')
     root.geometry("300x80")
     textBox = Text(root, height=2, width=10)
     textBox.pack()
-    buttonCommit = Button(root, height=1, width=10, text="confirma", command=lambda: retrieve_input(textBox))
-    # command=lambda: retrieve_input() >>> just means do this when i press the button
+    buttonCommit = Button(root, height=1, width=10, text="Confirma", command=lambda: retrieve_input(textBox))
     buttonCommit.pack()
     mainloop()
     root.destroy()
 
-
-# Esta função gerencia as ações do mouse na janela do OpenCV. Dependendo do tipo de ação do mouse (botão pressionado, liberado, movimento),
-# ela atualiza as listas de coordenadas para linhas e a linha de calibração.
-# function which will be called on mouse input
 def mouseActions(action, x, y, flags, *userdata):
     # Referencing global variables
     global elementLines, tempLines, originalImage, clicked, totalLines, totalColumns, calibrationLine, pixFactor, dFactor, auxFactor
@@ -93,92 +131,106 @@ def mouseActions(action, x, y, flags, *userdata):
                 tempLines = [(x, clicked)]
 
 
-# Esta função captura uma imagem de diferentes fontes: arquivo local, URL ou um arquivo específico.
-# A imagem é então ajustada para caber na tela e redimensionada. Retorna a imagem completa, a imagem redimensionada,
-# linhas e colunas totais, fator de redimensionamento e nome do arquivo.
+def run_opencv_loop():
+    """ Executa o loop de exibição do OpenCV e captura eventos do mouse """
+    global originalImage, opencv_running
+    opencv_running = True
+
+    cv2.namedWindow("Window", cv2.WINDOW_NORMAL)
+    cv2.setMouseCallback("Window", mouseActions)  # 🔹 Captura eventos do mouse
+
+    while opencv_running:
+        if originalImage is not None:
+            temp_image = originalImage.copy()
+            Processamento.drawLines(temp_image, calibrationLine, tempLines, elementLines, totalColumns, totalLines)
+            cv2.imshow("Window", temp_image)
+
+        if cv2.waitKey(1) == 113 or not opencv_running:  # Pressione 'q' para sair
+            break
+
+    cv2.destroyAllWindows()
+
+def toggle_fullscreen(root):
+    is_fullscreen = root.attributes("-fullscreen")
+    root.attributes("-fullscreen", not is_fullscreen)
+    status_message.set("Tela cheia ativada" if not is_fullscreen else "Tela cheia desativada")
+
+def toggle_video_mode():
+    global videoMode
+    videoMode *= -1
+    status_message.set("Modo de vídeo alternado")
+
 def captureImage(source):
-    fileName = ''
-    if (source == 1):
-        fileName = dlg.askopenfilename()  # .asksaveasfilename(confirmoverwrite=False)
-        if fileName != '':
-            print(fileName)
-            fullImage = cv2.imread(fileName)
-    elif (source == 0):
-        with urlopen('http://10.14.38.133:8080/shot.jpg') as url:
-            imgResp = url.read()
-        imgNp = np.array(bytearray(imgResp), dtype=np.uint8)  # Numpy to convert into a array
-        fullImage = cv2.imdecode(imgNp, -1)  # Finally decode the array to OpenCV usable format ;)
-    elif (source == 2):
-        fullImage = cv2.imread('D:/TCC/ovo_base.jpg')
+    """Captura uma imagem de um arquivo local ou de uma URL e abre o menu interativo."""
+    global fullImage, originalImage, totalLines, totalColumns, nomeArquivo, opencv_running, elementLines, tempLines, calibrationLine, menu_active
 
-    # fullImage = cv2.rotate(fullImage, cv2.ROTATE_90_CLOCKWISE)
-    totalLines, totalColumns, rFactor = Processamento.adjustImageDimension(fullImage)  # Adjust full image to fit on screem
-    down_points = (totalColumns, totalLines)
-    originalImage = cv2.resize(fullImage, down_points, interpolation=cv2.INTER_LINEAR)
+    elementLines.clear()
+    tempLines.clear()
+    calibrationLine.clear()
+    menu_active = True  # Ativa o menu interativo somente após abrir uma imagem
 
-    return (fullImage, originalImage, totalLines, totalColumns, rFactor, fileName)
+    if source == 1:
+        nomeArquivo = dlg.askopenfilename()
+        if nomeArquivo:
+            fullImage = cv2.imread(nomeArquivo)
+            status_message.set("Imagem carregada de arquivo")
+    else:
+        status_message.set("Fonte não reconhecida")
+        return
 
+    if fullImage is not None:
+        totalLines, totalColumns, rFactor = Processamento.adjustImageDimension(fullImage)
+        down_points = (totalColumns, totalLines)
+        originalImage = cv2.resize(fullImage, down_points, interpolation=cv2.INTER_LINEAR)
+        status_message.set("Imagem carregada com sucesso")
+        threading.Thread(target=run_opencv_loop, daemon=True).start()
+        show_interactive_menu()  # Exibe o menu interativo junto com a imagem
+    else:
+        status_message.set("Erro ao carregar a imagem")
 
-# Programa Principal
-# Ele inicializa a janela do OpenCV, define o callback do mouse, captura uma imagem inicial e entra em um loop onde:
-# Exibe a imagem e desenha as linhas nela. E Verifica as teclas pressionadas para executar diferentes ações.
-if sys.version_info[0] == 3:
-    from urllib.request import urlopen
-else:
-    from urllib.request import urlopen
+def show_help():
+    help_text = (
+        "Comandos Disponíveis:\n\n"
+        "Deletar Linha: Remove a última linha desenhada\n"
+        "Salvar Imagem: Salva a imagem atual no sistema\n"
+        "Alternar Modo de Vídeo: Ativa/Desativa o modo de vídeo\n"
+        "Carregar Imagem: Seleciona uma imagem do arquivo\n"
+        "Capturar Imagem URL: Captura imagem de uma URL ao vivo\n"
+    )
+    messagebox.showinfo("Ajuda - Comandos", help_text)
 
-cv2.namedWindow("Window")  # Create a named window
-cv2.setMouseCallback("Window", mouseActions)  # highgui function called when mouse events occur
-fullImage, originalImage, totalLines, totalColumns, rFactor, nomeArquivo = captureImage(2)  # Read Images
-auxFactor = rFactor
+def main_menu():
+    global status_message
+    root = Tk()
+    root.title("Menu Interativo - Processamento de Imagem")
+    root.geometry("800x600")  # Define um tamanho fixo adequado para monitores modernos
 
-while True:
-    # Display the image
-    if videoMode == 1:
-        fullImage, originalImage, totalLines, totalColumns, rFactor, nomeArquivo = captureImage(0)
+    status_message = StringVar()
+    status_message.set("Pronto")
 
-    image = originalImage.copy()
-    image = Processamento.drawLines(image, calibrationLine, tempLines, elementLines, totalColumns, totalLines)
+    menu_bar = Menu(root)
+    help_menu = Menu(menu_bar, tearoff=0)
+    help_menu.add_command(label="Comandos Disponíveis", command=show_help)
+    help_menu.add_command(label="Tela Cheia", command=lambda: toggle_fullscreen(root))
+    menu_bar.add_cascade(label="Ajuda", menu=help_menu)
+    root.config(menu=menu_bar)
 
-    cv2.imshow("Window", image)
-    k = cv2.waitKey(1)
+    frame = Frame(root, bg="#e3f2fd")
+    frame.pack(fill="both", expand=True, padx=20, pady=20)
 
-    if (k == 113):  # 'q' sair do sistema
-        break
+    Button(frame, text="📂 Carregar Imagem de Arquivo", command=lambda: captureImage(1), height=2, width=40, bg="#bbdefb", fg="#0d47a1", activebackground="#90caf9", activeforeground="#0d47a1", font=("Arial", 12, "bold")).pack(pady=10)
+    Button(frame, text="🌐 Capturar Imagem via URL", command=lambda: captureImage(0), height=2, width=40, bg="#c8e6c9", fg="#1b5e20", activebackground="#a5d6a7", activeforeground="#1b5e20", font=("Arial", 12, "bold")).pack(pady=10)
+    Button(frame, text="🎥 Alternar Modo de Vídeo", command=toggle_video_mode, height=2, width=40, bg="#ffe0b2", fg="#e65100", activebackground="#ffcc80", activeforeground="#e65100", font=("Arial", 12, "bold")).pack(pady=10)
+    Button(frame, text="❌ Sair", command=root.quit, height=2, width=40, bg="#ffccbc", fg="#b71c1c", activebackground="#ffab91", activeforeground="#b71c1c", font=("Arial", 12, "bold")).pack(pady=10)
 
-    if (k == 100):  # 'd' deletar a última linha
-        if len(elementLines) > 0:
-            del elementLines[-1]
-        tempLines = []
-        clicked = 0
+    status_label = Label(root, textvariable=status_message, bg="#e3f2fd", fg="#0d47a1", font=("Arial", 10))
+    status_label.pack(side="bottom", fill="x", pady=10)
 
-    if (k == 112):  # 'p' ativar o processamento de imagem
-        pixFactor = 0.25041736227045075125208681135225
-        print("Nome Arquivo antes da chamada de processamento ==> ", nomeArquivo)
-        Processamento.subImagens(elementLines, fullImage, totalColumns, totalLines, rFactor, pixFactor, dFactor, nomeArquivo)
-        cv2.namedWindow("Window")  # Create a named window
-        cv2.setMouseCallback("Window", mouseActions)
-        fullImage, originalImage, totalLines, totalColumns, rFactor, nomeArquivo = captureImage(1)
+    root.mainloop()
 
-    if (k == 99):  # 'c' capturar uma nova imagem
-        videoMode = -1
-        fullImage, originalImage, totalLines, totalColumns, rFactor, nomeArquivo = captureImage(0)
+if __name__ == "__main__":
+    main_menu()
 
-    if (k == 102):  # 'f' ler imagem de arquivo
-        fullImage, originalImage, totalLines, totalColumns, rFactor, nomeArquivo = captureImage(1)
-
-    if (k == 120):  # 'x' iniciar calibração pixFactor
-        clicked = 3
-        calibrationLine = []
-    if (k == 118):  # 'v' alternar modo de vídeo
-        videoMode = videoMode * -1
-
-    if (k == 115):  # 's' salvar a imagem em um arquivo
-        fileNameSave = dlg.asksaveasfilename(confirmoverwrite=False)
-        if fileNameSave != '':
-            cv2.imwrite(fileNameSave, fullImage)
-
-cv2.destroyAllWindows()
 
 '''
 def subImagens(imagem):
