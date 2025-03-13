@@ -23,37 +23,47 @@ nomeArquivo = ""
 status_message = None
 opencv_running = False
 menu_active = False
+interactive_menu = None  # Variável global para armazenar o menu interativo
+
 
 def show_interactive_menu():
-    """Cria e exibe o menu interativo de controle da imagem."""
-    menu = Toplevel()
-    menu.title("Opções de Imagem")
-    menu.geometry("250x150")
+    global interactive_menu
+    interactive_menu = Toplevel()
+    interactive_menu.title("Opções de Imagem")
+    interactive_menu.geometry("250x150")
 
     def delete_last_line():
         global elementLines
         if elementLines:
             elementLines.pop()
-            update_image_cache() # Atualiza a imagem após deletar a linha
+            update_image_cache()
+        interactive_menu.destroy()
 
     def save_image():
         if fullImage is not None:
             fileNameSave = dlg.asksaveasfilename(confirmoverwrite=False)
             if fileNameSave:
                 cv2.imwrite(fileNameSave, fullImage)
-        menu.destroy()
+        interactive_menu.destroy()
 
     def close_program():
         global opencv_running
         opencv_running = False
-        menu.destroy()
+        close_interactive_menu()  # Apenas fecha o menu interativo
         cv2.destroyAllWindows()
 
-    Button(menu, text="🖌️ Deletar Última Linha", command=delete_last_line).pack(pady=5, fill='x')
-    Button(menu, text="💾 Salvar Imagem", command=save_image).pack(pady=5, fill='x')
-    Button(menu, text="❌ Fechar", command=close_program).pack(pady=5, fill='x')
+    Button(interactive_menu, text="🖌️ Deletar Última Linha", command=delete_last_line).pack(pady=5, fill='x')
+    Button(interactive_menu, text="💾 Salvar Imagem", command=save_image).pack(pady=5, fill='x')
+    Button(interactive_menu, text="❌ Fechar", command=close_program).pack(pady=5, fill='x')
 
-    menu.mainloop()
+    interactive_menu.mainloop()
+
+def close_interactive_menu():
+    global interactive_menu
+    if interactive_menu is not None:
+        interactive_menu.destroy()
+        interactive_menu = None
+
 
 def update_image_cache():
     """Atualiza a exibição da imagem no OpenCV com as alterações recentes."""
@@ -130,14 +140,11 @@ def mouseActions(action, x, y, flags, *userdata):
             if clicked == 2:
                 tempLines = [(x, clicked)]
 
-
 def run_opencv_loop():
-    """ Executa o loop de exibição do OpenCV e captura eventos do mouse """
     global originalImage, opencv_running
     opencv_running = True
-
     cv2.namedWindow("Window", cv2.WINDOW_NORMAL)
-    cv2.setMouseCallback("Window", mouseActions)  # 🔹 Captura eventos do mouse
+    cv2.setMouseCallback("Window", mouseActions)
 
     while opencv_running:
         if originalImage is not None:
@@ -145,7 +152,14 @@ def run_opencv_loop():
             Processamento.drawLines(temp_image, calibrationLine, tempLines, elementLines, totalColumns, totalLines)
             cv2.imshow("Window", temp_image)
 
-        if cv2.waitKey(1) == 113 or not opencv_running:  # Pressione 'q' para sair
+        key = cv2.waitKey(1)
+        if key == 113 or cv2.getWindowProperty("Window", cv2.WND_PROP_VISIBLE) < 1:
+            close_interactive_menu()  # Fecha apenas o menu interativo
+            opencv_running = False
+            break
+
+        if cv2.getWindowProperty("Window", cv2.WND_PROP_VISIBLE) < 1:
+            close_interactive_menu()  # Fecha apenas o menu interativo
             break
 
     cv2.destroyAllWindows()
