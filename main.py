@@ -84,7 +84,7 @@ def show_interactive_menu(): #Função para exibir o menu interativo
         pixFactor = 0.25041736227045075125208681135225
         print("Nome Arquivo antes da chamada de processamento ==> ", nomeArquivo)
         Processamento.subImagens(fullImage, totalColumns, totalLines, rFactor, pixFactor, dFactor, nomeArquivo)
-        cv2.namedWindow("Window")  # Cria a janela nomeada
+        cv2.namedWindow("Window")  # Cria a janela
         cv2.setMouseCallback("Window", mouseActions)
         fullImage, originalImage, totalLines, totalColumns, rFactor, nomeArquivo = captureImage(1)
 
