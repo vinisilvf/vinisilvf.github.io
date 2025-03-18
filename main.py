@@ -19,53 +19,91 @@ auxFactor = 1
 videoMode = -1
 fullImage = None
 originalImage = None
-nomeArquivo = ""
-status_message = None
-opencv_running = False
-menu_active = False
+nomeArquivo = "" # Variável para armazenar o nome do arquivo
+opencv_running = False #Variável para controlar o loop do OpenCV
+menu_active = False #Variável para controlar a exibição do menu interativo
 interactive_menu = None  # Variável global para armazenar o menu interativo
 
+def captureImage(source):
+    """Captura uma imagem de um arquivo local ou de uma URL e abre o menu interativo."""
+    global fullImage, originalImage, totalLines, totalColumns, rFactor, nomeArquivo, opencv_running, elementLines, tempLines, calibrationLine, menu_active
 
-def show_interactive_menu():
+    elementLines.clear()
+    tempLines.clear()
+    calibrationLine.clear()
+    menu_active = True  # Ativa o menu interativo somente após abrir uma imagem
+
+    if source == 1:
+        nomeArquivo = dlg.askopenfilename()
+        if nomeArquivo:
+            fullImage = cv2.imread(nomeArquivo)
+            status_message.set("Imagem carregada de arquivo")
+    else:
+        status_message.set("Fonte não reconhecida")
+        return
+
+    if fullImage is not None:
+        totalLines, totalColumns, rFactor = Processamento.adjustImageDimension(fullImage)
+        down_points = (totalColumns, totalLines)
+        originalImage = cv2.resize(fullImage, down_points, interpolation=cv2.INTER_LINEAR)
+        status_message.set("Imagem carregada com sucesso")
+        threading.Thread(target=run_opencv_loop, daemon=True).start()
+        show_interactive_menu()  # Exibe o menu interativo junto com a imagem
+    else:
+        status_message.set("Erro ao carregar a imagem")
+
+def show_interactive_menu(): #Função para exibir o menu interativo
     global interactive_menu
     interactive_menu = Toplevel()
     interactive_menu.title("Opções de Imagem")
     interactive_menu.geometry("250x150")
+    interactive_menu.resizable(False, False)
 
-    def delete_last_line():
+    def delete_last_line(): #Função para deletar a última linha
         global elementLines
         if elementLines:
             elementLines.pop()
             update_image_cache()
         interactive_menu.destroy()
 
-    def save_image():
+    def save_image(): #Função para salvar a imagem
         if fullImage is not None:
             fileNameSave = dlg.asksaveasfilename(confirmoverwrite=False)
             if fileNameSave:
                 cv2.imwrite(fileNameSave, fullImage)
         interactive_menu.destroy()
 
-    def close_program():
+    def close_program(): #Função para fechar o programa
         global opencv_running
         opencv_running = False
         close_interactive_menu()  # Apenas fecha o menu interativo
         cv2.destroyAllWindows()
 
+    def processamento_action():  # Função para processamento de imagem
+        global pixFactor, nomeArquivo, fullImage, originalImage, totalLines, totalColumns, rFactor, dFactor, elementLines
+        pixFactor = 0.25041736227045075125208681135225
+        print("Nome Arquivo antes da chamada de processamento ==> ", nomeArquivo)
+        Processamento.subImagens(fullImage, totalColumns, totalLines, rFactor, pixFactor, dFactor, nomeArquivo)
+        cv2.namedWindow("Window")  # Cria a janela nomeada
+        cv2.setMouseCallback("Window", mouseActions)
+        fullImage, originalImage, totalLines, totalColumns, rFactor, nomeArquivo = captureImage(1)
+
+
+    Button(interactive_menu, text="⚙️ Processamento de Imagem", command=processamento_action).pack(pady=5, fill='x')
     Button(interactive_menu, text="🖌️ Deletar Última Linha", command=delete_last_line).pack(pady=5, fill='x')
     Button(interactive_menu, text="💾 Salvar Imagem", command=save_image).pack(pady=5, fill='x')
     Button(interactive_menu, text="❌ Fechar", command=close_program).pack(pady=5, fill='x')
 
     interactive_menu.mainloop()
 
-def close_interactive_menu():
+def close_interactive_menu(): #Função para fechar o menu interativo
     global interactive_menu
     if interactive_menu is not None:
         interactive_menu.destroy()
         interactive_menu = None
 
 
-def update_image_cache():
+def update_image_cache(): #Função para atualizar a imagem no OpenCV
     """Atualiza a exibição da imagem no OpenCV com as alterações recentes."""
     global originalImage
     if originalImage is not None:
@@ -73,14 +111,14 @@ def update_image_cache():
         Processamento.drawLines(temp_image, calibrationLine, tempLines, elementLines, totalColumns, totalLines)
         cv2.imshow("Window", temp_image)
 
-def retrieve_input(textBox):
+def retrieve_input(textBox): #Função para capturar o fator de pixel
     global pixFactor
     inputValue = textBox.get("1.0", "end-1c")
     pixFactor = int(inputValue)
     status_message.set(f"Fator de pixel atualizado para {pixFactor}")
     textBox.quit()
 
-def capture_distance():
+def capture_distance(): # Função para capturar a distância entre dois pontos
     root = Tk()
     root.title('Informe referência em cm')
     root.geometry("300x80")
@@ -91,7 +129,7 @@ def capture_distance():
     mainloop()
     root.destroy()
 
-def mouseActions(action, x, y, flags, *userdata):
+def mouseActions(action, x, y, flags, *userdata): # Função para ações do mouse
     # Referencing global variables
     global elementLines, tempLines, originalImage, clicked, totalLines, totalColumns, calibrationLine, pixFactor, dFactor, auxFactor
     # Mark the top left corner when left mouse button is pressed
@@ -140,7 +178,7 @@ def mouseActions(action, x, y, flags, *userdata):
             if clicked == 2:
                 tempLines = [(x, clicked)]
 
-def run_opencv_loop():
+def run_opencv_loop(): #Função para rodar o loop do OpenCV
     global originalImage, opencv_running
     opencv_running = True
     cv2.namedWindow("Window", cv2.WINDOW_NORMAL)
@@ -164,43 +202,16 @@ def run_opencv_loop():
 
     cv2.destroyAllWindows()
 
-def toggle_fullscreen(root):
+
+def toggle_fullscreen(root): # Função para alternar entre tela cheia e janela
     is_fullscreen = root.attributes("-fullscreen")
     root.attributes("-fullscreen", not is_fullscreen)
     status_message.set("Tela cheia ativada" if not is_fullscreen else "Tela cheia desativada")
 
-def toggle_video_mode():
+def toggle_video_mode(): # Função para alternar entre modo de vídeo e imagem
     global videoMode
     videoMode *= -1
     status_message.set("Modo de vídeo alternado")
-
-def captureImage(source):
-    """Captura uma imagem de um arquivo local ou de uma URL e abre o menu interativo."""
-    global fullImage, originalImage, totalLines, totalColumns, nomeArquivo, opencv_running, elementLines, tempLines, calibrationLine, menu_active
-
-    elementLines.clear()
-    tempLines.clear()
-    calibrationLine.clear()
-    menu_active = True  # Ativa o menu interativo somente após abrir uma imagem
-
-    if source == 1:
-        nomeArquivo = dlg.askopenfilename()
-        if nomeArquivo:
-            fullImage = cv2.imread(nomeArquivo)
-            status_message.set("Imagem carregada de arquivo")
-    else:
-        status_message.set("Fonte não reconhecida")
-        return
-
-    if fullImage is not None:
-        totalLines, totalColumns, rFactor = Processamento.adjustImageDimension(fullImage)
-        down_points = (totalColumns, totalLines)
-        originalImage = cv2.resize(fullImage, down_points, interpolation=cv2.INTER_LINEAR)
-        status_message.set("Imagem carregada com sucesso")
-        threading.Thread(target=run_opencv_loop, daemon=True).start()
-        show_interactive_menu()  # Exibe o menu interativo junto com a imagem
-    else:
-        status_message.set("Erro ao carregar a imagem")
 
 def show_help():
     help_text = (
@@ -217,7 +228,7 @@ def main_menu():
     global status_message
     root = Tk()
     root.title("Menu Interativo - Processamento de Imagem")
-    root.geometry("800x600")  # Define um tamanho fixo adequado para monitores modernos
+    root.geometry("375x500")  # Define um tamanho fixo adequado para monitores modernos
 
     status_message = StringVar()
     status_message.set("Pronto")
