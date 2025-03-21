@@ -1,3 +1,4 @@
+import os
 from tkinter import Tk, Text, mainloop, Button, Menu, filedialog as dlg, messagebox, Frame, Label, StringVar, Toplevel
 import cv2
 import numpy as np
@@ -18,7 +19,9 @@ dFactor = 1
 auxFactor = 1
 videoMode = -1
 fullImage = None
+baseImage = None
 originalImage = None
+temp_image = None
 nomeArquivo = "" # Variável para armazenar o nome do arquivo
 opencv_running = False #Variável para controlar o loop do OpenCV
 menu_active = False #Variável para controlar a exibição do menu interativo
@@ -26,7 +29,8 @@ interactive_menu = None  # Variável global para armazenar o menu interativo
 
 def captureImage(source):
     """Captura uma imagem de um arquivo local ou de uma URL e abre o menu interativo."""
-    global fullImage, originalImage, totalLines, totalColumns, rFactor, nomeArquivo, opencv_running, elementLines, tempLines, calibrationLine, menu_active
+    global fullImage, baseImage, originalImage, totalLines, totalColumns, rFactor, nomeArquivo
+    global opencv_running, elementLines, tempLines, calibrationLine, menu_active
 
     elementLines.clear()
     tempLines.clear()
@@ -45,7 +49,10 @@ def captureImage(source):
     if fullImage is not None:
         totalLines, totalColumns, rFactor = Processamento.adjustImageDimension(fullImage)
         down_points = (totalColumns, totalLines)
-        originalImage = cv2.resize(fullImage, down_points, interpolation=cv2.INTER_LINEAR)
+        # Cria a imagem base limpa (nunca modificada)
+        baseImage = cv2.resize(fullImage, down_points, interpolation=cv2.INTER_LINEAR)
+        # originalImage não será alterada; ela pode ser usada apenas para referência
+        originalImage = baseImage.copy()
         status_message.set("Imagem carregada com sucesso")
         threading.Thread(target=run_opencv_loop, daemon=True).start()
         show_interactive_menu()  # Exibe o menu interativo junto com a imagem
@@ -59,12 +66,13 @@ def show_interactive_menu(): #Função para exibir o menu interativo
     interactive_menu.geometry("250x150")
     interactive_menu.resizable(False, False)
 
-    def delete_last_line(): #Função para deletar a última linha
-        global elementLines
+    def delete_last_line():
+        global elementLines, tempLines
         if elementLines:
             elementLines.pop()
-            update_image_cache()
-        interactive_menu.destroy()
+        # Limpa também a lista de linhas temporárias
+        tempLines.clear()
+        update_image_cache()
 
     def save_image(): #Função para salvar a imagem
         if fullImage is not None:
@@ -73,11 +81,29 @@ def show_interactive_menu(): #Função para exibir o menu interativo
                 cv2.imwrite(fileNameSave, fullImage)
         interactive_menu.destroy()
 
-    def close_program(): #Função para fechar o programa
-        global opencv_running
+    def close_everything():
+        global opencv_running, interactive_menu
+
+        print("🛑 Encerrando o programa...")
+
+        # 🚀 1. Parar o loop do OpenCV imediatamente
         opencv_running = False
-        close_interactive_menu()  # Apenas fecha o menu interativo
-        cv2.destroyAllWindows()
+
+        # 🚀 2. Fechar todas as janelas OpenCV corretamente
+        if cv2.getWindowProperty("Window", cv2.WND_PROP_VISIBLE) >= 0:
+            print("🔄 Fechando OpenCV...")
+            cv2.destroyAllWindows()
+            cv2.waitKey(1)  # Pequeno delay para garantir fechamento
+
+        # 🚀 3. Fechar o menu interativo, se ainda estiver aberto
+        if interactive_menu is not None:
+            print("🔄 Fechando menu interativo...")
+            try:
+                interactive_menu.destroy()
+            except Exception as e:
+                print(f"⚠️ Erro ao fechar menu interativo: {e}")
+
+            interactive_menu = None
 
     def processamento_action():  # Função para processamento de imagem
         global pixFactor, nomeArquivo, fullImage, originalImage, totalLines, totalColumns, rFactor, dFactor, elementLines
@@ -88,28 +114,35 @@ def show_interactive_menu(): #Função para exibir o menu interativo
         cv2.setMouseCallback("Window", mouseActions)
         fullImage, originalImage, totalLines, totalColumns, rFactor, nomeArquivo = captureImage(1)
 
+    interactive_menu.protocol("WM_DELETE_WINDOW", lambda: threading.Thread(target=close_everything, daemon=True).start())
 
     Button(interactive_menu, text="⚙️ Processamento de Imagem", command=processamento_action).pack(pady=5, fill='x')
     Button(interactive_menu, text="🖌️ Deletar Última Linha", command=delete_last_line).pack(pady=5, fill='x')
     Button(interactive_menu, text="💾 Salvar Imagem", command=save_image).pack(pady=5, fill='x')
-    Button(interactive_menu, text="❌ Fechar", command=close_program).pack(pady=5, fill='x')
+    Button(interactive_menu, text="❌ Fechar", command=close_everything).pack(pady=5, fill='x')
 
-    interactive_menu.mainloop()
 
-def close_interactive_menu(): #Função para fechar o menu interativo
-    global interactive_menu
+def close_interactive_menu():
+    global interactive_menu, status_message
+
     if interactive_menu is not None:
-        interactive_menu.destroy()
-        interactive_menu = None
+        status_message.set("Fechando menu interativo")
 
+        try:
+            # 🚀 Garantir que a janela do menu seja fechada antes de definir como None
+            interactive_menu.destroy()
+        except Exception as e:
+            print(f"⚠️ Erro ao fechar menu interativo: {e}")
 
-def update_image_cache(): #Função para atualizar a imagem no OpenCV
-    """Atualiza a exibição da imagem no OpenCV com as alterações recentes."""
-    global originalImage
-    if originalImage is not None:
-        temp_image = originalImage.copy()
+        interactive_menu = None  # Remover referência para evitar novos acessos
+
+def update_image_cache():
+    global baseImage, totalColumns, totalLines
+    if baseImage is not None:
+        temp_image = baseImage.copy()
         Processamento.drawLines(temp_image, calibrationLine, tempLines, elementLines, totalColumns, totalLines)
         cv2.imshow("Window", temp_image)
+        cv2.waitKey(1)
 
 def retrieve_input(textBox): #Função para capturar o fator de pixel
     global pixFactor
@@ -191,17 +224,16 @@ def run_opencv_loop(): #Função para rodar o loop do OpenCV
             cv2.imshow("Window", temp_image)
 
         key = cv2.waitKey(1)
-        if key == 113 or cv2.getWindowProperty("Window", cv2.WND_PROP_VISIBLE) < 1:
-            close_interactive_menu()  # Fecha apenas o menu interativo
-            opencv_running = False
+        if key == 113 or not opencv_running:  # Sai se pressionar "q" ou o programa for encerrado
             break
 
+        # 🚀 Nova condição para encerrar o OpenCV corretamente:
         if cv2.getWindowProperty("Window", cv2.WND_PROP_VISIBLE) < 1:
-            close_interactive_menu()  # Fecha apenas o menu interativo
+            opencv_running = False  # Para o loop
+            close_interactive_menu()
             break
 
     cv2.destroyAllWindows()
-
 
 def toggle_fullscreen(root): # Função para alternar entre tela cheia e janela
     is_fullscreen = root.attributes("-fullscreen")
@@ -223,6 +255,56 @@ def show_help():
         "Capturar Imagem URL: Captura imagem de uma URL ao vivo\n"
     )
     messagebox.showinfo("Ajuda - Comandos", help_text)
+
+import os
+import sys
+import time
+
+def exit_program(root):
+    global opencv_running, interactive_menu
+
+    print("🛑 Encerrando o programa...")
+
+    # 🚀 1. Parar o loop do OpenCV
+    opencv_running = False
+
+    # 🚀 2. Fechar todas as janelas do OpenCV corretamente
+    if cv2.getWindowProperty("Window", cv2.WND_PROP_VISIBLE) >= 0:
+        print("🔄 Fechando OpenCV...")
+        cv2.destroyAllWindows()
+        cv2.waitKey(1)  # Pequeno delay para garantir que fechou
+
+    # 🚀 3. Fechar o menu interativo, se ainda estiver aberto
+    if interactive_menu is not None and isinstance(interactive_menu, Toplevel):
+        print("🔄 Fechando menu interativo...")
+        try:
+            interactive_menu.destroy()
+        except Exception as e:
+            print(f"⚠️ Erro ao fechar menu interativo: {e}")
+        interactive_menu = None
+
+    # 🚀 4. Forçar o Tkinter a sair imediatamente
+    print("🔄 Forçando atualização do Tkinter...")
+    try:
+        root.quit()  # Sai do mainloop() imediatamente
+        root.update_idletasks()
+        root.update()
+    except Exception as e:
+        print(f"⚠️ Erro ao atualizar root: {e}")
+
+    # 🚀 5. Garantir que o `mainloop()` foi realmente encerrado
+    print("🛑 Finalizando Tkinter...")
+    try:
+        root.destroy()
+    except Exception as e:
+        print(f"⚠️ Erro ao destruir root: {e}")
+
+    # 🚀 6. FORÇAR encerramento se ainda estiver travado
+    print("💀 Forçando encerramento total...")
+    time.sleep(0.2)  # Pequeno delay final para garantir fechamento
+    os._exit(0)
+
+
 
 def main_menu():
     global status_message
@@ -246,7 +328,7 @@ def main_menu():
     Button(frame, text="📂 Carregar Imagem de Arquivo", command=lambda: captureImage(1), height=2, width=40, bg="#bbdefb", fg="#0d47a1", activebackground="#90caf9", activeforeground="#0d47a1", font=("Arial", 12, "bold")).pack(pady=10)
     Button(frame, text="🌐 Capturar Imagem via URL", command=lambda: captureImage(0), height=2, width=40, bg="#c8e6c9", fg="#1b5e20", activebackground="#a5d6a7", activeforeground="#1b5e20", font=("Arial", 12, "bold")).pack(pady=10)
     Button(frame, text="🎥 Alternar Modo de Vídeo", command=toggle_video_mode, height=2, width=40, bg="#ffe0b2", fg="#e65100", activebackground="#ffcc80", activeforeground="#e65100", font=("Arial", 12, "bold")).pack(pady=10)
-    Button(frame, text="❌ Sair", command=root.quit, height=2, width=40, bg="#ffccbc", fg="#b71c1c", activebackground="#ffab91", activeforeground="#b71c1c", font=("Arial", 12, "bold")).pack(pady=10)
+    Button(frame, text="❌ Sair", command=lambda: threading.Thread(target=exit_program, args=(root,), daemon= True).start(), height=2, width=40, bg="#ffccbc", fg="#b71c1c", activebackground="#ffab91", activeforeground="#b71c1c", font=("Arial", 12, "bold")).pack(pady=10)
 
     status_label = Label(root, textvariable=status_message, bg="#e3f2fd", fg="#0d47a1", font=("Arial", 10))
     status_label.pack(side="bottom", fill="x", pady=10)
