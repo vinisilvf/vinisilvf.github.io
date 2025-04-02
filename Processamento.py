@@ -103,6 +103,7 @@ def subImagens(img, tColumns, tLines, factor, pixFactor, dFactor, nomeArquivo):
     global __path_file_name
     imgProcess = img.copy()
     results_folder_path = Path(os.getcwd(), 'results')
+    # Create a new results directory because it does not exist
     check_and_create_directory_if_not_exist(results_folder_path)
     if nomeArquivo == '':
         new_file_name = dlg.asksaveasfilename(confirmoverwrite=False, initialdir=results_folder_path)
@@ -112,13 +113,18 @@ def subImagens(img, tColumns, tLines, factor, pixFactor, dFactor, nomeArquivo):
 
     file_path_results = Path(results_folder_path, __path_file_name.stem)
     check_and_create_directory_if_not_exist(file_path_results)
+    # processed_path = Path(__path_file_name.parent, 'processed')
     processed_path = Path(file_path_results, 'processed')
+    # Check whether the specified path exists or not
     plot_results_path = Path(file_path_results, 'fit_plots_results')
     check_and_create_directory_if_not_exist(processed_path)
     check_and_create_directory_if_not_exist(plot_results_path)
 
+    # Create the report file path
     nomeRelatorio = Path(results_folder_path, 'Relatorio.dad')
+    # Now creating the report file itself with its reference
     arqRelatorio = open(nomeRelatorio, 'at')
+
     posEggs = findeggs(img)
     lMin = cMin = +9999
     lMax = cMax = -9999
@@ -130,6 +136,7 @@ def subImagens(img, tColumns, tLines, factor, pixFactor, dFactor, nomeArquivo):
     max_workers = max(1, multiprocessing.cpu_count() - 1)
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = []
+        # Esse trecho envia todos os ovos para serem processados em paralelo usando múltiplos núcleos da CPU. Reduzindo o tempo de execução.
         for nFile, egg in enumerate(posEggs, 1):
             futures.append(executor.submit(
                 process_single_egg,

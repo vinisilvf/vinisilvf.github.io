@@ -6,6 +6,7 @@ import sys
 import urlopen
 import Processamento
 import threading
+import time
 
 # Lists to store the Lines coordinators
 elementLines = []
@@ -66,7 +67,7 @@ def show_interactive_menu(): #Função para exibir o menu interativo
     interactive_menu.geometry("250x150")
     interactive_menu.resizable(False, False)
 
-    def delete_last_line():
+    def delete_last_line(): #Função para deletar a ultima linha
         global elementLines, tempLines
         if elementLines:
             elementLines.pop()
@@ -86,16 +87,16 @@ def show_interactive_menu(): #Função para exibir o menu interativo
 
         print("🛑 Encerrando o programa...")
 
-        # 🚀 1. Parar o loop do OpenCV imediatamente
+        # 1. Parar o loop do OpenCV imediatamente
         opencv_running = False
 
-        # 🚀 2. Fechar todas as janelas OpenCV corretamente
+        # 2. Fechar todas as janelas OpenCV corretamente
         if cv2.getWindowProperty("Window", cv2.WND_PROP_VISIBLE) >= 0:
             print("🔄 Fechando OpenCV...")
             cv2.destroyAllWindows()
             cv2.waitKey(1)  # Pequeno delay para garantir fechamento
 
-        # 🚀 3. Fechar o menu interativo, se ainda estiver aberto
+        # 3. Fechar o menu interativo, se ainda estiver aberto
         if interactive_menu is not None:
             print("🔄 Fechando menu interativo...")
             try:
@@ -108,11 +109,13 @@ def show_interactive_menu(): #Função para exibir o menu interativo
     def processamento_action():  # Função para processamento de imagem
         global pixFactor, nomeArquivo, fullImage, originalImage, totalLines, totalColumns, rFactor, dFactor, elementLines
         pixFactor = 0.25041736227045075125208681135225
+        #teste nome arquivo
         print("Nome Arquivo antes da chamada de processamento ==> ", nomeArquivo)
         Processamento.subImagens(fullImage, totalColumns, totalLines, rFactor, pixFactor, dFactor, nomeArquivo)
+        update_image_cache()
         cv2.namedWindow("Window")  # Cria a janela
         cv2.setMouseCallback("Window", mouseActions)
-        fullImage, originalImage, totalLines, totalColumns, rFactor, nomeArquivo = captureImage(1)
+
 
     interactive_menu.protocol("WM_DELETE_WINDOW", lambda: threading.Thread(target=close_everything, daemon=True).start())
 
@@ -129,7 +132,7 @@ def close_interactive_menu():
         status_message.set("Fechando menu interativo")
 
         try:
-            # 🚀 Garantir que a janela do menu seja fechada antes de definir como None
+            # Garantir que a janela do menu seja fechada antes de definir como None
             interactive_menu.destroy()
         except Exception as e:
             print(f"⚠️ Erro ao fechar menu interativo: {e}")
@@ -144,7 +147,7 @@ def update_image_cache():
         cv2.imshow("Window", temp_image)
         cv2.waitKey(1)
 
-def retrieve_input(textBox): #Função para capturar o fator de pixel
+def retrieve_input(textBox): # Esta função obtém o valor de entrada de um Text widget do tkinter
     global pixFactor
     inputValue = textBox.get("1.0", "end-1c")
     pixFactor = int(inputValue)
@@ -255,10 +258,6 @@ def show_help():
         "Capturar Imagem URL: Captura imagem de uma URL ao vivo\n"
     )
     messagebox.showinfo("Ajuda - Comandos", help_text)
-
-import os
-import sys
-import time
 
 def exit_program(root):
     global opencv_running, interactive_menu
