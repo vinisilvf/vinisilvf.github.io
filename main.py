@@ -264,16 +264,16 @@ def exit_program(root):
 
     print("🛑 Encerrando o programa...")
 
-    # 🚀 1. Parar o loop do OpenCV
+    # Parar o loop do OpenCV
     opencv_running = False
 
-    # 🚀 2. Fechar todas as janelas do OpenCV corretamente
+    # Fechar todas as janelas do OpenCV corretamente
     if cv2.getWindowProperty("Window", cv2.WND_PROP_VISIBLE) >= 0:
         print("🔄 Fechando OpenCV...")
         cv2.destroyAllWindows()
         cv2.waitKey(1)  # Pequeno delay para garantir que fechou
 
-    # 🚀 3. Fechar o menu interativo, se ainda estiver aberto
+    # Fechar o menu interativo, se ainda estiver aberto
     if interactive_menu is not None and isinstance(interactive_menu, Toplevel):
         print("🔄 Fechando menu interativo...")
         try:
@@ -282,7 +282,7 @@ def exit_program(root):
             print(f"⚠️ Erro ao fechar menu interativo: {e}")
         interactive_menu = None
 
-    # 🚀 4. Forçar o Tkinter a sair imediatamente
+    # Forçar o Tkinter a sair imediatamente
     print("🔄 Forçando atualização do Tkinter...")
     try:
         root.quit()  # Sai do mainloop() imediatamente
@@ -291,14 +291,14 @@ def exit_program(root):
     except Exception as e:
         print(f"⚠️ Erro ao atualizar root: {e}")
 
-    # 🚀 5. Garantir que o `mainloop()` foi realmente encerrado
+    # Garantir que o `mainloop()` foi realmente encerrado
     print("🛑 Finalizando Tkinter...")
     try:
         root.destroy()
     except Exception as e:
         print(f"⚠️ Erro ao destruir root: {e}")
 
-    # 🚀 6. FORÇAR encerramento se ainda estiver travado
+    # FORÇAR encerramento se ainda estiver travado
     print("💀 Forçando encerramento total...")
     time.sleep(0.2)  # Pequeno delay final para garantir fechamento
     os._exit(0)
