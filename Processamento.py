@@ -40,27 +40,70 @@ def adjustImageDimension(im):
         tLines = int(tLines * rFactor)
     return (tLines, tColumns, rFactor)
 
-def process_single_egg(egg, img_bytes, shape, factor, pixFactor, processed_path, plot_results_path, nFile, path_file_name):
+# extraída da parte interna do (for egg in posEggs) antigo codigo da função subimagens
+def process_single_egg(egg, img_bytes, shape, factor, pixFactor, dFactor, processed_path, plot_results_path, nFile, path_file_name):
     from Processamento import process, create_sheet, disc_slices_curve_fit, polynomial_curv_3, polynomial_curv_5, polynomial_curv_7, polynomial_curv_9, polynomial_curv_11  # reimportação dentro do subprocesso (necessária p/ Windows)
-    imgProcess = np.frombuffer(img_bytes, dtype=np.uint8).reshape(shape)
+    imgProcess = np.frombuffer(img_bytes, dtype=np.uint8).reshape(shape).copy()
     (gr, ll, col, lin, larg, alt) = egg
     lIni = int(lin - round(alt * 0.075))
     lFin = int(lin + round(alt * 1.075))
     cIni = int(col - round(larg * 0.075))
     cFin = int(col + round(larg * 1.075))
     recImage = imgProcess[lIni:lFin, cIni:cFin].copy()
+    # Criar pasta do ovo para gráficos
     egg_num = str(nFile)
     egg_folder_fit_plot_path = Path(plot_results_path, egg_num)
     check_and_create_directory_if_not_exist(egg_folder_fit_plot_path)
+
     resultado = process(recImage, 1, pixFactor, egg_num, path_file_name, egg_folder_fit_plot_path)
-    if resultado[1] == -1:
-        return None
-    imgProc, a, b, c, d, v, area, *_ = resultado
+
+    # print(f"\n\nRESULTADO Processamento da imagem :\n {resultado}\n\n")
+    imgProc, a, b, c, d, v, area, pAi, pAf, pBi, pBf = resultado
+    cSEx = int(min(pAi[0], pAf[0], pBi[0], pBf[0]))
+    cSEy = int(min(pAi[1], pAf[1], pBi[1], pBf[1]))
+
+    cIDx = int(max(pAi[0], pAf[0], pBi[0], pBf[0]))
+    cIDy = int(max(pAi[1], pAf[1], pBi[1], pBf[1]))
+
+    rotateImage = recImage[cSEx: cIDx, cSEy: cIDy]
+
+    # rotateImage = imutils.rotate_bound(recImage, angulo)
+
+    try:
+        termo1 = math.acos((b / 2) / (d)) * (d ** 2 / math.sqrt(d ** 2 - (b / 2) ** 2))
+        termo2 = math.acos((b / 2) / c) * (c ** 2 / math.sqrt(c ** 2 - (b / 2) ** 2))
+        vFormulaArea = 2 * math.pi * (b / 2) ** 2 + math.pi * (b / 2) * (termo1 + termo2)
+    except ValueError:
+        vFormulaArea = 1
+    try:
+        vFormulaVolume = (b / 2) ** 2 * ((2 * math.pi) / 3) * (d + c)
+    except ValueError:
+        vFormulaVolume = 1
+
+    # nomeArquivo = rf'{__path_folder}/Processed/{__root_file_name}_{nFile}.png'
+    # rotateFileName = rf'{__path_folder}/Processed/rotate_{__root_file_name}_{nFile}.png'
+
     processedImageName = str(Path(processed_path, f'{nFile}.png'))
     rotateProcessedImageName = str(Path(processed_path, f'rotate_{nFile}.png'))
-    leituraArquivo = f'{processedImageName},{a},{b},{c},{d},{v},{area},{pixFactor}, {factor}\n'
-    cv2.imwrite(processedImageName, imgProc)
-    cv2.imwrite(rotateProcessedImageName, recImage)
+
+    leituraArquivo = f'{processedImageName},{a},{b},{c},{d},{v},{area},{vFormulaArea},{vFormulaVolume},{pixFactor}, {dFactor}\n'
+    nFile += 1
+
+    cv2.imwrite(str(processedImageName), imgProc)
+    cv2.imwrite(str(rotateProcessedImageName), rotateImage)
+
+    # imgProcess[linhas[x]:linhas[x + 1], colunas[y]:colunas[y + 1]] = imgProc
+    imgProcess[lIni:lFin, cIni:cFin] = imgProc
+
+    # Redimensiona para exibição
+    tLines, tColumns, _ = adjustImageDimension(imgProcess)
+    down_points = (tColumns, tLines)
+    dispImage = cv2.resize(imgProcess, down_points, interpolation=cv2.INTER_LINEAR)
+
+    # Desabilitar a exibição da imagem
+    # cv2.imshow("Window", dispImage)
+    # cv2.waitKey(1)
+
     return (leituraArquivo, lIni, lFin, cIni, cFin, imgProc)
 
 # Esta função desenha linhas na imagem com base em coordenadas fornecidas para linhas
@@ -105,19 +148,24 @@ def subImagens(img, tColumns, tLines, factor, pixFactor, dFactor, nomeArquivo):
     results_folder_path = Path(os.getcwd(), 'results')
     # Create a new results directory because it does not exist
     check_and_create_directory_if_not_exist(results_folder_path)
+
     if nomeArquivo == '':
         new_file_name = dlg.asksaveasfilename(confirmoverwrite=False, initialdir=results_folder_path)
         __path_file_name = Path(new_file_name)
     else:
         __path_file_name = Path(nomeArquivo)
 
+    # Check whether the specified path exists or not
+    print('Check whether the specified path exists or not')
     file_path_results = Path(results_folder_path, __path_file_name.stem)
     check_and_create_directory_if_not_exist(file_path_results)
+
     # processed_path = Path(__path_file_name.parent, 'processed')
     processed_path = Path(file_path_results, 'processed')
+    check_and_create_directory_if_not_exist(processed_path)
+
     # Check whether the specified path exists or not
     plot_results_path = Path(file_path_results, 'fit_plots_results')
-    check_and_create_directory_if_not_exist(processed_path)
     check_and_create_directory_if_not_exist(plot_results_path)
 
     # Create the report file path
@@ -133,14 +181,19 @@ def subImagens(img, tColumns, tLines, factor, pixFactor, dFactor, nomeArquivo):
     shape = imgProcess.shape
 
     # Limita numero de processos
+    # multiprocessing.cpu_count() retorna a qnt disponivel de nucles logicos (threads de cpu) na maquina
+    # o uso do -1 é para deixar ao menos 1 nucleo livre
     max_workers = max(1, multiprocessing.cpu_count() - 1)
+    # print(f"Executando com {max_workers} processos paralelos")
+    # ProcessPoolExecutor "chama" a função process_single_egg paralelamente(isolados) executando em nucles diferentes da CPU
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = []
         # Esse trecho envia todos os ovos para serem processados em paralelo usando múltiplos núcleos da CPU. Reduzindo o tempo de execução.
         for nFile, egg in enumerate(posEggs, 1):
+            # Cada ovo detectado é processado por um "processo" separado (process_single_egg) por meio da linha abaixo
             futures.append(executor.submit(
                 process_single_egg,
-                egg, img_bytes, shape, dFactor, pixFactor,
+                egg, img_bytes, shape, factor, pixFactor, dFactor,
                 str(processed_path), str(plot_results_path), nFile, str(__path_file_name)
             ))
 
@@ -161,6 +214,7 @@ def subImagens(img, tColumns, tLines, factor, pixFactor, dFactor, nomeArquivo):
     tLines, tColumns, _ = adjustImageDimension(recImage)
     down_points = (tColumns, tLines)
     dispImage = cv2.resize(recImage, down_points, interpolation=cv2.INTER_LINEAR)
+
     # Substituído: cv2.imshow() e waitKey() blocks
     resultado_img_path = Path(file_path_results, 'imagem_processada_final.png')
     cv2.imwrite(str(resultado_img_path), dispImage)
@@ -498,23 +552,33 @@ def findeggs(originalImg):
     ovos = []
     (alt, larg, ch) = originalImg.shape
     AreaTotal = alt * larg
+    # preprocess the image
     gray_img = cv2.cvtColor(originalImg, cv2.COLOR_BGR2GRAY)
+    # Applying 7x7 Gaussian Blur
     blurred = cv2.GaussianBlur(gray_img, (7, 7), 0)
+    # Applying threshold
     threshold = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
+    # Apply the Component analysis function
     analysis = cv2.connectedComponentsWithStats(threshold, 4, cv2.CV_32S)
     (totalLabels, label_ids, values, centroid) = analysis
+    # Loop through each component
     for i in range(1, totalLabels):
+        # Area of the component
         area = values[i, cv2.CC_STAT_AREA]
         percArea = (area * 100) / AreaTotal
         aspectRatio = float(int(values[i, cv2.CC_STAT_HEIGHT]) / int(values[i, cv2.CC_STAT_WIDTH]))
+
         if (percArea > 0.4) and (percArea < 1) and (aspectRatio > 1.1) and (aspectRatio < 1.6):
             (col, lin) = centroid[i]
             x = values[i, cv2.CC_STAT_LEFT]
             y = values[i, cv2.CC_STAT_TOP]
             w = values[i, cv2.CC_STAT_WIDTH]
             h = values[i, cv2.CC_STAT_HEIGHT]
-            ovos.append([0, lin, x, y, w, h])
+            elem = [0, lin, x, y, w, h]
+            ovos.append(elem)
+    posVet = 0
     grupo = 1
+    # categoriza pela posição na linha, são classificados aquelas regiões cuja posição não linha variam abaixo de 10%
     for i in range(len(ovos)):
         if ovos[i][0] == 0:
             ovos[i][0] = grupo
@@ -522,9 +586,24 @@ def findeggs(originalImg):
                 if (abs(ovos[k][1] - ovos[i][1]) * 100) / ovos[i][1] < 10:
                     ovos[k][0] = grupo
             grupo += 1
-    ovos.sort(key=lambda x: (x[0], x[2]))
-    return ovos
 
+    # ordena pela linha
+    for i in range(0, len(ovos) - 1):
+        for j in range(i + 1, len(ovos)):
+            if ovos[j][0] < ovos[i][0]:
+                troca = ovos[j]
+                ovos[j] = ovos[i]
+                ovos[i] = troca
+
+    # ordena pela coluna
+    # controle = 1
+    for i in range(0, len(ovos) - 1):
+        for j in range(i+1, len(ovos)):
+            if ((ovos[j][0] == ovos[i][0]) and (ovos[j][2] < ovos[i][2])):
+                troca = ovos[j]
+                ovos[j] = ovos[i]
+                ovos[i] = troca
+    return ovos
 
 """
 Representação da curva - Curva polinomial de grau 3
