@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import sys
 import Processamento
-
+import atexit
 # Lists to store the Lines coordinators
 elementLines = []
 calibrationLine = []
@@ -127,9 +127,11 @@ if sys.version_info[0] == 3:
 else:
     from urllib.request import urlopen
 
+atexit.register(cv2.destroyAllWindows)
+
 cv2.namedWindow("Window")  # Create a named window
 cv2.setMouseCallback("Window", mouseActions)  # highgui function called when mouse events occur
-fullImage, originalImage, totalLines, totalColumns, rFactor, nomeArquivo = captureImage(2)  # Read Images
+fullImage, originalImage, totalLines, totalColumns, rFactor, nomeArquivo = captureImage(1)  # Read Images
 auxFactor = rFactor
 
 while True:
@@ -155,7 +157,7 @@ while True:
     if (k == 112):  # 'p' ativar o processamento de imagem
         pixFactor = 0.25041736227045075125208681135225
         print("Nome Arquivo antes da chamada de processamento ==> ", nomeArquivo)
-        Processamento.subImagens(elementLines, fullImage, totalColumns, totalLines, rFactor, pixFactor, dFactor, nomeArquivo)
+        Processamento.subImagens(fullImage, totalColumns, totalLines, rFactor, pixFactor, dFactor, nomeArquivo)
         cv2.namedWindow("Window")  # Create a named window
         cv2.setMouseCallback("Window", mouseActions)
         fullImage, originalImage, totalLines, totalColumns, rFactor, nomeArquivo = captureImage(1)
