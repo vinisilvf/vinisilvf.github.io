@@ -75,6 +75,8 @@ def drawLines(image, calibrationLine, tempLines, elementLines, totalColumns, tot
 # temLines -> lista de coordenadas para linhas temp
 # elementLines -> lista de coordenadas para linhas de elementos
 def subImagens(img, tColumns, tLines, factor, pixFactor, dFactor, nomeArquivo):
+    import time
+    start = time.perf_counter()
     imgProcess = img.copy()
     proceed = False
     global __path_file_name
@@ -211,6 +213,8 @@ def subImagens(img, tColumns, tLines, factor, pixFactor, dFactor, nomeArquivo):
         cv2.waitKey(1)
 
     arqRelatorio.close()
+    end = time.perf_counter()
+    print(f'[subImagens - SEM paralelismo] Tempo total: {end - start:.2f}s')
     recImage = imgProcess[lMin:lMax, cMin:cMax]
     tLines, tColumns, x = adjustImageDimension(recImage)
     down_points = (tColumns, tLines)
