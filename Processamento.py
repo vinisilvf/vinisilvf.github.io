@@ -18,7 +18,22 @@ from scipy.optimize import curve_fit  # Lib p/ fazer ajuste polinomial
 import matplotlib.pyplot as plt
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
-from functools import partial
+import time
+
+# --------------------------------------------------------------------
+# 1) CPU‑only: roda em subprocessos, sem NENHUM I/O
+# --------------------------------------------------------------------
+def cpu_process_egg(job):
+    """
+    Recebe um job com (egg_num, rec_bytes, shape, l0,l1,c0,c1,pixFactor),
+    executa SOMENTE o processamento numérico e devolve tudo em memória.
+    """
+    egg_num, rec_bytes, shape, l0, l1, c0, c1, pixFactor = job
+    rec = np.frombuffer(rec_bytes, dtype=np.uint8).reshape(shape)
+    # Chama a função de cálculo “puro” (sem I/O interno)
+    original, A, B, C, D, chosen_vol, chosen_area, x_data, y_data = \
+        process(rec, 1, pixFactor, None, None, None)
+    return egg_num, l0, l1, c0, c1, (original, A, B, C, D, chosen_vol, chosen_area, x_data, y_data)
 
 def check_and_create_directory_if_not_exist(path_directory):
     if not os.path.exists(path_directory):
@@ -39,72 +54,6 @@ def adjustImageDimension(im):
         tColumns = 1800
         tLines = int(tLines * rFactor)
     return (tLines, tColumns, rFactor)
-
-# extraída da parte interna do (for egg in posEggs) antigo codigo da função subimagens
-def process_single_egg(egg, img_bytes, shape, factor, pixFactor, dFactor, processed_path, plot_results_path, nFile, path_file_name):
-    from Processamento import process, create_sheet, disc_slices_curve_fit, polynomial_curv_3, polynomial_curv_5, polynomial_curv_7, polynomial_curv_9, polynomial_curv_11  # reimportação dentro do subprocesso (necessária p/ Windows)
-    imgProcess = np.frombuffer(img_bytes, dtype=np.uint8).reshape(shape).copy()
-    (gr, ll, col, lin, larg, alt) = egg
-    lIni = int(lin - round(alt * 0.075))
-    lFin = int(lin + round(alt * 1.075))
-    cIni = int(col - round(larg * 0.075))
-    cFin = int(col + round(larg * 1.075))
-    recImage = imgProcess[lIni:lFin, cIni:cFin].copy()
-    # Criar pasta do ovo para gráficos
-    egg_num = str(nFile)
-    egg_folder_fit_plot_path = Path(plot_results_path, egg_num)
-    check_and_create_directory_if_not_exist(egg_folder_fit_plot_path)
-
-    resultado = process(recImage, 1, pixFactor, egg_num, path_file_name, egg_folder_fit_plot_path)
-
-    # print(f"\n\nRESULTADO Processamento da imagem :\n {resultado}\n\n")
-    imgProc, a, b, c, d, v, area, pAi, pAf, pBi, pBf = resultado
-    cSEx = int(min(pAi[0], pAf[0], pBi[0], pBf[0]))
-    cSEy = int(min(pAi[1], pAf[1], pBi[1], pBf[1]))
-
-    cIDx = int(max(pAi[0], pAf[0], pBi[0], pBf[0]))
-    cIDy = int(max(pAi[1], pAf[1], pBi[1], pBf[1]))
-
-    rotateImage = recImage[cSEx: cIDx, cSEy: cIDy]
-
-    # rotateImage = imutils.rotate_bound(recImage, angulo)
-
-    try:
-        termo1 = math.acos((b / 2) / (d)) * (d ** 2 / math.sqrt(d ** 2 - (b / 2) ** 2))
-        termo2 = math.acos((b / 2) / c) * (c ** 2 / math.sqrt(c ** 2 - (b / 2) ** 2))
-        vFormulaArea = 2 * math.pi * (b / 2) ** 2 + math.pi * (b / 2) * (termo1 + termo2)
-    except ValueError:
-        vFormulaArea = 1
-    try:
-        vFormulaVolume = (b / 2) ** 2 * ((2 * math.pi) / 3) * (d + c)
-    except ValueError:
-        vFormulaVolume = 1
-
-    # nomeArquivo = rf'{__path_folder}/Processed/{__root_file_name}_{nFile}.png'
-    # rotateFileName = rf'{__path_folder}/Processed/rotate_{__root_file_name}_{nFile}.png'
-
-    processedImageName = str(Path(processed_path, f'{nFile}.png'))
-    rotateProcessedImageName = str(Path(processed_path, f'rotate_{nFile}.png'))
-
-    leituraArquivo = f'{processedImageName},{a},{b},{c},{d},{v},{area},{vFormulaArea},{vFormulaVolume},{pixFactor}, {dFactor}\n'
-    nFile += 1
-
-    cv2.imwrite(str(processedImageName), imgProc)
-    cv2.imwrite(str(rotateProcessedImageName), rotateImage)
-
-    # imgProcess[linhas[x]:linhas[x + 1], colunas[y]:colunas[y + 1]] = imgProc
-    imgProcess[lIni:lFin, cIni:cFin] = imgProc
-
-    # Redimensiona para exibição
-    tLines, tColumns, _ = adjustImageDimension(imgProcess)
-    down_points = (tColumns, tLines)
-    dispImage = cv2.resize(imgProcess, down_points, interpolation=cv2.INTER_LINEAR)
-
-    # Desabilitar a exibição da imagem
-    # cv2.imshow("Window", dispImage)
-    # cv2.waitKey(1)
-
-    return (leituraArquivo, lIni, lFin, cIni, cFin, imgProc)
 
 # Esta função desenha linhas na imagem com base em coordenadas fornecidas para linhas
 # de calibração, temporárias e de elementos.
@@ -136,161 +85,143 @@ def drawLines(image, calibrationLine, tempLines, elementLines, totalColumns, tot
 
     return (image)
 
-
 # Essa função extrai sub-imagens de uma imagem maior com base
 # em linhas temporárias e de elementos.
 # variaveis: image -> imagem da qual as subimagens serão extraidas
 # temLines -> lista de coordenadas para linhas temp
 # elementLines -> lista de coordenadas para linhas de elementos
 def subImagens(img, tColumns, tLines, factor, pixFactor, dFactor, nomeArquivo):
-    global __path_file_name
+    """
+    1) monta a lista de jobs (imagem, coordenadas, pixFactor)
+    2) paraleliza SÓ cpu_process_egg (sem I/O interno)
+    3) fora do pool, faz TODO o I/O:
+       - grava PNGs
+       - escreve Relatorio.dad
+       - gera gráficos (disc_slices_curve_fit)
+       - atualiza Excel (create_sheet)
+       - compõe imagem final
+    """
     imgProcess = img.copy()
-    results_folder_path = Path(os.getcwd(), 'results')
-    # Create a new results directory because it does not exist
-    check_and_create_directory_if_not_exist(results_folder_path)
-
-    if nomeArquivo == '':
-        new_file_name = dlg.asksaveasfilename(confirmoverwrite=False, initialdir=results_folder_path)
-        __path_file_name = Path(new_file_name)
-    else:
-        __path_file_name = Path(nomeArquivo)
-
-    # Check whether the specified path exists or not
-    print('Check whether the specified path exists or not')
-    file_path_results = Path(results_folder_path, __path_file_name.stem)
-    check_and_create_directory_if_not_exist(file_path_results)
-
-    # processed_path = Path(__path_file_name.parent, 'processed')
-    processed_path = Path(file_path_results, 'processed')
-    check_and_create_directory_if_not_exist(processed_path)
-
-    # Check whether the specified path exists or not
-    plot_results_path = Path(file_path_results, 'fit_plots_results')
-    check_and_create_directory_if_not_exist(plot_results_path)
-
-    # Create the report file path
-    nomeRelatorio = Path(results_folder_path, 'Relatorio.dad')
-    # Now creating the report file itself with its reference
-    arqRelatorio = open(nomeRelatorio, 'at')
-
     posEggs = findeggs(img)
-    lMin = cMin = +9999
-    lMax = cMax = -9999
 
-    img_bytes = imgProcess.tobytes()
-    shape = imgProcess.shape
+    # 2.1) montar jobs
+    jobs = []
+    for n, egg in enumerate(posEggs, 1):
+        _, lin, x, y, w, h = egg
+        l0 = int(lin - round(h*0.075))
+        l1 = int(lin + round(h*1.075))
+        c0 = int(x   - round(w*0.075))
+        c1 = int(x   + round(w*1.075))
+        rec = img[l0:l1, c0:c1].copy()
+        jobs.append((n, rec.tobytes(), rec.shape, l0, l1, c0, c1, pixFactor))
 
-    # Limita numero de processos
-    # multiprocessing.cpu_count() retorna a qnt disponivel de nucles logicos (threads de cpu) na maquina
-    # o uso do -1 é para deixar ao menos 1 nucleo livre
-    max_workers = max(1, multiprocessing.cpu_count() - 1)
-    # print(f"Executando com {max_workers} processos paralelos")
-    # ProcessPoolExecutor "chama" a função process_single_egg paralelamente(isolados) executando em nucles diferentes da CPU
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        futures = []
-        # Esse trecho envia todos os ovos para serem processados em paralelo usando múltiplos núcleos da CPU. Reduzindo o tempo de execução.
-        for nFile, egg in enumerate(posEggs, 1):
-            # Cada ovo detectado é processado por um "processo" separado (process_single_egg) por meio da linha abaixo
-            futures.append(executor.submit(
-                process_single_egg,
-                egg, img_bytes, shape, factor, pixFactor, dFactor,
-                str(processed_path), str(plot_results_path), nFile, str(__path_file_name)
-            ))
+    # 2.2) paralelizar SÓ processamento CPU
+    maxw = max(1, multiprocessing.cpu_count() - 1)
+    with ProcessPoolExecutor(max_workers=maxw) as exe:
+        results = list(exe.map(cpu_process_egg, jobs))
 
-        for future in futures:
-            result = future.result()
-            if result:
-                leituraArquivo, lIni, lFin, cIni, cFin, imgProc = result
-                arqRelatorio.write(leituraArquivo)
-                imgProcess[lIni:lFin, cIni:cFin] = imgProc
-                lMin = min(lMin, lIni)
-                cMin = min(cMin, cIni)
-                lMax = max(lMax, lFin)
-                cMax = max(cMax, cFin)
+    # 2.3) preparar diretórios de saída
+    root      = Path.cwd()/'results'/Path(nomeArquivo).stem
+    processed = root/'processed'
+    plots     = root/'fit_plots_results'
+    for d in (root, processed, plots):
+        check_and_create_directory_if_not_exist(d)
+    rel = open(root/'Relatorio.dad', 'a')
 
-    arqRelatorio.close()
+    # 2.4) TODO o I/O ocorre AQUI, sequencialmente
+    for egg_num, l0, l1, c0, c1, out in results:
+        img_proc, A, B, C, D, _, _, x_data, y_data = out
 
-    recImage = imgProcess[lMin:lMax, cMin:cMax]
-    tLines, tColumns, _ = adjustImageDimension(recImage)
-    down_points = (tColumns, tLines)
-    dispImage = cv2.resize(recImage, down_points, interpolation=cv2.INTER_LINEAR)
+        # --- 2.4.1) PNG e .dad -----------------------
+        fn_png = processed / f'{egg_num}.png'
+        cv2.imwrite(str(fn_png), img_proc)
+        rel.write(f"{fn_png},{A},{B},{C},{D},0,0\n")  # volumes vão ser recalculados abaixo
 
-    # Substituído: cv2.imshow() e waitKey() blocks
-    resultado_img_path = Path(file_path_results, 'imagem_processada_final.png')
-    cv2.imwrite(str(resultado_img_path), dispImage)
-    print(f"Imagem final salva em: {resultado_img_path}")
+        # --- 2.4.2) CRIA SUB‑PASTA por ovo ------------
+        egg_plots = plots / str(egg_num)
+        check_and_create_directory_if_not_exist(egg_plots)
+
+        # --- 2.4.3) ajuste polinomial e gráficos -----
+        x_arr = np.array(x_data)
+        y_arr = np.array(y_data)
+        fits, errs = disc_slices_curve_fit(
+            x_arr, y_arr,
+            [polynomial_curv_3, polynomial_curv_5,
+             polynomial_curv_7, polynomial_curv_9, polynomial_curv_11],
+            nomeArquivo, egg_num, egg_plots
+        )
+
+        # --- 2.4.4) calcular volumes + áreas ---------
+        # volume “antigo” sem ajuste
+        old_slices = dict(zip(x_data, y_data))
+        oldV, oldA = calcVolume(old_slices, pixFactor)
+        volume_results = {'Antigo': (oldV, oldA)}
+        # volumes por polinômio
+        for func, slice_dict in fits.items():
+            v, a = calcVolume(slice_dict, pixFactor)
+            volume_results[func] = (v, a)
+
+        # --- 2.4.5) Excel ----------------------------
+        create_sheet(egg_plots, str(egg_num), volume_results, errs)
+
+        # --- 2.4.6) cola no mosaico final ------------
+        imgProcess[l0:l1, c0:c1] = img_proc
+
+    rel.close()
+
+    # 2.5) salva resultado completo
+    final_fn = root/'imagem_processada_final.png'
+    cv2.imwrite(str(final_fn), imgProcess)
+    print("Processamento concluído em:", root)
+
 
 def process(frame, factor, pixFactor, egg_num, path_file_name, egg_folder_fit_plot_path):
 
     # Measures that will be returned
-    A = 0
-    B = 0
-    C = 0
-    D = 0
+    A = B = C = D = 0
 
     # Uma cópia da imagem original é feita para preservar a imagem na resolução original.
     original = frame.copy()
-    # original = cv2.cvtColor(original, cv2.COLOR_BGR2RGB)
 
-    # A imagem é reduzida de acordo com um fator fornecido como argumento para otimizar o tempo de processamento.
-    [lin, col, ch] = original.shape
+    # Reduz a imagem para acelerar
+    lin, col, ch = original.shape
     frame = resize(frame, [int(lin / factor), int(col / factor)])
     frame = np.uint8(frame * 255)
 
-    # data = rgb2ycbcr(frame)
-    #
-    # # Define thresholds for channel 1 based on histogram settings
-    # channel1Min = 123.000
-    # channel1Max = 255.000
-    #
-    # # Define thresholds for channel 2 based on histogram settings
-    # channel2Min = 0.000
-    # channel2Max = 255.000
-    #
-    # # Define thresholds for channel 3 based on histogram settings
-    # channel3Min = 0.000
-    # channel3Max = 255.000
-
+    # Segmentação HSV
     data = rgb2hsv(frame)
+    channel1Min, channel1Max = 0.0, 1.0
+    channel2Min, channel2Max = 0.0, 1.0
+    channel3Min, channel3Max = 0.578, 1.0
 
-    # % Define thresholds for channel 1 based on histogram settings
-    channel1Min = 0.000
-    channel1Max = 1.000
-
-    # % Define thresholds for channel 2 based on histogram settings
-    channel2Min = 0.000
-    channel2Max = 1.000
-
-    # % Define thresholds for channel 3 based on histogram settings
-    channel3Min = 0.578
-    channel3Max = 1.000
-
-    # Creating the mask for segmentation
     print('Creating the mask for segmentation')
-    data = np.bitwise_and(np.bitwise_and(np.bitwise_and(data[:, :, 0] >= channel1Min, data[:, :, 0] <= channel1Max),
-                                         np.bitwise_and(data[:, :, 1] >= channel2Min, data[:, :, 1] <= channel2Max)),
-                          np.bitwise_and(data[:, :, 2] >= channel3Min, data[:, :, 2] <= channel3Max))
-    data[data is True] = 1
-    data[data is False] = 0
-
+    data = np.bitwise_and(
+        np.bitwise_and(
+            np.bitwise_and(data[:,:,0] >= channel1Min, data[:,:,0] <= channel1Max),
+            np.bitwise_and(data[:,:,1] >= channel2Min, data[:,:,1] <= channel2Max)
+        ),
+        np.bitwise_and(data[:,:,2] >= channel3Min, data[:,:,2] <= channel3Max)
+    )
+    # REMOVIDO: data[data is True] = 1 / data[data is False] = 0
+    data[data > 0] = 1
     data = median(data, disk(3))
     data[data > 0] = 1
 
-    # Process to identify the bounding box that contains the egg and subsequently improve segmentation
+    # Encontrar bounding‐box do ovo
     print('Process to identify the bounding box that contains the egg and subsequently improve segmentation')
-    [linoriginal, coloriginal] = data.shape
+    linoriginal, coloriginal = data.shape
     labels = label(data)
-    props = regionprops_table(labels, properties=('bbox', 'major_axis_length', 'minor_axis_length'))
+    props = regionprops_table(labels, properties=('bbox','major_axis_length','minor_axis_length'))
     df = pd.DataFrame(props)
 
     fl_find_bb = False
-    for index, row in df.iterrows():
-        if 0.30 * linoriginal <= row['major_axis_length'] <= 1 * linoriginal and \
-                0.15 * coloriginal <= row['minor_axis_length'] <= 1 * coloriginal:
+    for _, row in df.iterrows():
+        if 0.30*linoriginal <= row['major_axis_length'] <= linoriginal and \
+           0.15*coloriginal <= row['minor_axis_length'] <= coloriginal:
             data = data.astype('uint8')
-            data[int(row['bbox-0']):int(row['bbox-2']), int(row['bbox-1']):int(row['bbox-3'])] = \
-                data[int(row['bbox-0']):int(row['bbox-2']), int(row['bbox-1']):int(row['bbox-3'])] + 1
-            data[data == 1] = 0
+            data[int(row['bbox-0']):int(row['bbox-2']),
+                 int(row['bbox-1']):int(row['bbox-3'])] += 1
+            data[data != 2] = 0
             data[data == 2] = 255
             fl_find_bb = True
             break
@@ -298,31 +229,28 @@ def process(frame, factor, pixFactor, egg_num, path_file_name, egg_folder_fit_pl
     if not fl_find_bb:
         return [original, -1, -1, -1, -1]
 
-    # Identifying the two points that form the longest straight line
+    # Encontrar maior eixo (A) e eixo perpendicular (B)
     print('Identifying the two points that form the longest straight line')
-    border_points = np.array(np.vstack(find_contours(data, 0.1)))
-    index_size, _ = border_points.shape
-    pt1 = pt2 = []
+    border_points = np.vstack(find_contours(data, 0.1))
     max_distance = 0
-    for i in range(1, index_size):
-        for j in range(i + 1, index_size):
-            distance = np.linalg.norm(border_points[i] * factor - border_points[j] * factor)
-            if distance > max_distance:
-                pt1 = border_points[i] * factor
-                pt2 = border_points[j] * factor
-                max_distance = distance
-
-    # Draw the line of these points on the original image
-    print('Draw the line of these points on the original image')
-    if len(pt1) > 0 and len(pt2) > 0:
-        original = cv2.line(original, (int(pt1[1]), int(pt1[0])), (int(pt2[1]), int(pt2[0])), (47, 141, 255),
-                            thickness=2)
+    pt1 = pt2 = []
+    for i in range(1, len(border_points)):
+        for j in range(i+1, len(border_points)):
+            d = np.linalg.norm(border_points[i]*factor - border_points[j]*factor)
+            if d > max_distance:
+                max_distance = d
+                pt1, pt2 = border_points[i]*factor, border_points[j]*factor
+    if len(pt1) and len(pt2):
+        original = cv2.line(original,
+                            (int(pt1[1]),int(pt1[0])),
+                            (int(pt2[1]),int(pt2[0])),
+                            (47,141,255),2)
         A = max_distance
 
-    # Finds the angle of the line formed by the previous points and, later, finds the longest straight line
+    # Cálculo do segundo eixo (B) e coleta de pontos para ajuste de curva
     print('Finds the angle of the line formed by the previous points and, later, finds the longest straight line')
-    msRmaior = (pt1[1] * factor - pt2[1] * factor) / (pt1[0] * factor - pt2[0] * factor)
-    ms = -1 / msRmaior
+    msRmaior = (pt1[1]*factor - pt2[1]*factor) / (pt1[0]*factor - pt2[0]*factor)
+    ms = -1/msRmaior
     ms = degrees(atan(ms))
     max_distance = 0
     pt3 = pt4 = []
@@ -330,130 +258,81 @@ def process(frame, factor, pixFactor, egg_num, path_file_name, egg_folder_fit_pl
     xdata = []
     ydata = []
 
-    for i in range(1, index_size):
-        for j in range(1, index_size):
+    for i in range(1, len(border_points)):
+        for j in range(1, len(border_points)):
             if border_points[j][0] != border_points[i][0]:
-                mdRmenor = (border_points[i][1] * factor - border_points[j][1] * factor) / (
-                        border_points[i][0] * factor - border_points[j][0] * factor)
-                bRmenor = border_points[i][1] - mdRmenor * border_points[i][0]  # defined constant of straight equation
-
+                mdRmenor = ((border_points[i][1]*factor - border_points[j][1]*factor) /
+                            (border_points[i][0]*factor - border_points[j][0]*factor))
+                bRmenor = border_points[i][1] - mdRmenor*border_points[i][0]
                 md = degrees(atan(mdRmenor))
                 if 0 <= abs(md - ms) <= 0.3:
-                    distance = np.linalg.norm(border_points[i] * factor - border_points[j] * factor)
-                    distP1 = abs(-mdRmenor * pt1[0] + pt1[1] - bRmenor) / ((mdRmenor ** 2 + 1) ** 0.5)
-
-                    original = cv2.line(original, (int(border_points[i][1]), int(border_points[i][0])),
-                                        (int(border_points[j][1]), int(border_points[j][0])), (30, 105, 210),
-                                        thickness=1)
-
-                    dicSlicesNoFit[distP1] = distance
-                    # !AQUI - Criar lista de X e Y para fazer o ajuste polinomial
+                    d = np.linalg.norm(border_points[i]*factor - border_points[j]*factor)
+                    distP1 = abs(-mdRmenor*pt1[0] + pt1[1] - bRmenor) / ((mdRmenor**2+1)**0.5)
+                    original = cv2.line(original,
+                                        (int(border_points[i][1]),int(border_points[i][0])),
+                                        (int(border_points[j][1]),int(border_points[j][0])),
+                                        (30,105,210),1)
+                    dicSlicesNoFit[distP1] = d
                     xdata.append(distP1)
-                    ydata.append(distance)
+                    ydata.append(d)
+                    if d > max_distance:
+                        max_distance = d
+                        pt3, pt4 = border_points[i]*factor, border_points[j]*factor
 
-                    if distance > max_distance:
-                        pt3 = border_points[i] * factor
-                        pt4 = border_points[j] * factor
-
-                        max_distance = distance
-
-    xdata = np.array(xdata)
-    ydata = np.array(ydata)
-
-    # List of polynomial curv functions to use
-    print('List of polynomial curv functions to use')
-    poly_degree_functions = [polynomial_curv_3, polynomial_curv_5, polynomial_curv_7, polynomial_curv_9,
-                             polynomial_curv_11]
-
-    # Calculate disc slices with curve fit and its errors
-    dic_slices_fit, curve_fit_errors = disc_slices_curve_fit(xdata, ydata, poly_degree_functions, path_file_name, egg_num, egg_folder_fit_plot_path)
-
-
-    # arqComparativo = open(rf'{__plot_results_path}/Relatorio_Comparativo_Volumes.dad', 'at')
-    # arqComparativo = open(Path(egg_folder_fit_plot_path, 'Relatorio_Comparativo_Volumes.txt'), 'at')
-
-    volume_results = {}
-
-    # Measure egg volume based on trapezoidal rule
-    print('Measure egg volume based on trapezoidal rule')
-    (oldVolume, oldEggArea) = calcVolume(dicSlicesNoFit, pixFactor)
-    volume_results["Antigo"] = (oldVolume, oldEggArea)
-
-    # volume chosen to calculate the pixels at the final of this function
-    chosen_volume = 0.0
-    chosen_area = 0.0
-
-    for poly_function in dic_slices_fit:
-        print(f'Calculando e Escrevendo volume e área da função polinomial : {poly_function.__name__}')
-        (poly_volume, poly_eggArea) = calcVolume(dic_slices_fit[poly_function], pixFactor)
-        volume_results[poly_function] = (poly_volume, poly_eggArea)
-        if poly_function == polynomial_curv_11:
-            chosen_volume = poly_volume
-            chosen_area = poly_eggArea
-
-    """ arqComparativo.write(f'{__path_file_name.name} - {egg_name}\n\nVolume Antigo (sem ajuste polinomial de curva) = {oldVolume}\nArea antiga (sem ajuste de curva) = {oldEggArea}\n\n')
-    last_volume = 0
-    last_eggArea = 0
-    for (poly_function, result_disc_slices) in dic_slices_fit:
-        if(dic_slices_fit[-1] == (poly_function, result_disc_slices)).all():
-            print(f'Calculando e Escrevendo Ultima function : {poly_function.__name__}')
-            (last_volume, last_eggArea)=calcVolume(result_disc_slices, pixFactor)
-            volume_results[poly_function] = (last_volume, last_eggArea)
-            arqComparativo.write(f'Volume Novo ({poly_function.__name__}) = {last_volume}\nArea Nova ({poly_function.__name__}) = {last_eggArea}\n\n')
-        else:
-            print(f'Calculando e Escrevendo function : {poly_function.__name__}')
-            (volume, eggArea)=calcVolume(result_disc_slices, pixFactor)
-            volume_results[poly_function] = (last_volume, last_eggArea)
-            arqComparativo.write(f'Volume Novo ({poly_function.__name__}) = {volume}\nArea Nova ({poly_function.__name__}) = {eggArea}\n\n')
-
-    arqComparativo.close() """
-
-    # Generate sheet file (.xlsx) with data of egg
-    create_sheet(egg_folder_fit_plot_path, egg_num, volume_results, curve_fit_errors)
-
-    # Draws the perpendicular line
-    if len(pt1) > 0 and len(pt2) > 0:
-        original = cv2.line(original, (int(pt3[1]), int(pt3[0])), (int(pt4[1]), int(pt4[0])), (0, 102, 0), thickness=2)
+    if len(pt3) and len(pt4):
+        original = cv2.line(original,
+                            (int(pt3[1]),int(pt3[0])),
+                            (int(pt4[1]),int(pt4[0])),
+                            (0,102,0),2)
         B = max_distance
 
-    # Finds the intersection of the lines and then draws the two sub-lines (Above and Below) of the perpendicular line
-    inter = lineLineIntersection(pt1, pt2, pt3, pt4)
+    # Linha de interseção para C e D…
+    inter = lineLineIntersection(pt1,pt2,pt3,pt4)
     if inter:
-        distance_pt1_inter = np.linalg.norm(pt1 - inter)
-        distance_pt2_inter = np.linalg.norm(pt2 - inter)
-        if distance_pt1_inter > distance_pt2_inter:
-            original = cv2.line(original, (int(pt1[1]), int(pt1[0])), (int(inter[1]), int(inter[0])), (0, 0, 255),
-                                thickness=2)
-            original = cv2.line(original, (int(pt2[1]), int(pt2[0])), (int(inter[1]), int(inter[0])), (255, 255, 255),
-                                thickness=2)
-            C = distance_pt1_inter
-            D = distance_pt2_inter
+        d1 = np.linalg.norm(pt1 - inter)
+        d2 = np.linalg.norm(pt2 - inter)
+        if d1 > d2:
+            C, D = d1, d2
+            original = cv2.line(original,(int(pt1[1]),int(pt1[0])),(int(inter[1]),int(inter[0])),(0,0,255),2)
+            original = cv2.line(original,(int(pt2[1]),int(pt2[0])),(int(inter[1]),int(inter[0])),(255,255,255),2)
         else:
-            original = cv2.line(original, (int(pt2[1]), int(pt2[0])), (int(inter[1]), int(inter[0])), (0, 0, 255),
-                                thickness=2)
-            original = cv2.line(original, (int(pt1[1]), int(pt1[0])), (int(inter[1]), int(inter[0])), (255, 255, 255),
-                                thickness=2)
-            C = distance_pt2_inter
-            D = distance_pt1_inter
+            C, D = d2, d1
+            original = cv2.line(original,(int(pt2[1]),int(pt2[0])),(int(inter[1]),int(inter[0])),(0,0,255),2)
+            original = cv2.line(original,(int(pt1[1]),int(pt1[0])),(int(inter[1]),int(inter[0])),(255,255,255),2)
 
-    A *= pixFactor
-    B *= pixFactor
-    C *= pixFactor
-    D *= pixFactor
+    # =======================
+    # REMOVIDO TODO ESTE BLOCO DE CÁLCULO DE CURVA E I/O:
+    #
+    # dic_slices_fit, curve_fit_errors = \
+    #     disc_slices_curve_fit(xdata, ydata, poly_degree_functions,
+    #                           path_file_name, egg_num, egg_folder_fit_plot_path)
+    # volume_results = {}
+    # (oldVolume, oldEggArea) = calcVolume(dicSlicesNoFit, pixFactor)
+    # volume_results["Antigo"] = (oldVolume, oldEggArea)
+    # for poly_function in dic_slices_fit:
+    #     (poly_volume, poly_area) = calcVolume(dic_slices_fit[poly_function], pixFactor)
+    #     volume_results[poly_function] = (poly_volume, poly_area)
+    #     if poly_function == polynomial_curv_11:
+    #         chosen_volume = poly_volume
+    #         chosen_area = poly_area
+    # create_sheet(egg_folder_fit_plot_path, egg_num, volume_results, curve_fit_errors)
+    # =======================
 
-    cv2.putText(original, 'A: ' + str("{:.3f}".format(A)), (original.shape[1] - 150, 30), cv2.FONT_HERSHEY_SIMPLEX,
-                0.75, (47, 141, 255), 1)
-    cv2.putText(original, 'B: ' + str("{:.3f}".format(B)), (original.shape[1] - 150, 50), cv2.FONT_HERSHEY_SIMPLEX,
-                0.75, (0, 102, 0), 1)
-    cv2.putText(original, 'C: ' + str("{:.3f}".format(C)), (original.shape[1] - 150, 70), cv2.FONT_HERSHEY_SIMPLEX,
-                0.75, (0, 0, 255), 1)
-    cv2.putText(original, 'D: ' + str("{:.3f}".format(D)), (original.shape[1] - 150, 90), cv2.FONT_HERSHEY_SIMPLEX,
-                0.75, (255, 255, 255), 1)
-    cv2.putText(original, 'V: ' + str("{:.3f}".format(chosen_volume)), (original.shape[1] - 150, 110),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.75, (30, 105, 210), 1)
+    # Como removemos o bloco acima, precisamos definir defaults para não dar NameError:
+    chosen_volume = 0.0
+    chosen_area   = 0.0
 
-    return [original, A, B, C, D, chosen_volume, chosen_area, pt1, pt2, pt3, pt4]
+    # Desenha valores A, B, C, D e V
+    A *= pixFactor; B *= pixFactor; C *= pixFactor; D *= pixFactor
+    cv2.putText(original, f'A: {A:.3f}', (original.shape[1]-150,  30), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (47,141,255), 1)
+    cv2.putText(original, f'B: {B:.3f}', (original.shape[1]-150,  50), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0,102,  0), 1)
+    cv2.putText(original, f'C: {C:.3f}', (original.shape[1]-150,  70), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0,  0,255), 1)
+    cv2.putText(original, f'D: {D:.3f}', (original.shape[1]-150,  90), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255,255,255), 1)
+    cv2.putText(original, f'V: {chosen_volume:.3f}', (original.shape[1]-150,110), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (30,105,210),1)
+
+    # retorna a tupla completa de dados e os vetores xdata, ydata para o ajuste ficar fora daqui
+    return original, A, B, C, D, chosen_volume, chosen_area, xdata, ydata
+
 
 
 # Function to return the intersection between two lines
