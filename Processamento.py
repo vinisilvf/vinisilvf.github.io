@@ -18,7 +18,7 @@ from scipy.optimize import curve_fit  # Lib p/ fazer ajuste polinomial
 import matplotlib.pyplot as plt
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
-from functools import partial
+import time
 
 def check_and_create_directory_if_not_exist(path_directory):
     if not os.path.exists(path_directory):
@@ -144,6 +144,7 @@ def drawLines(image, calibrationLine, tempLines, elementLines, totalColumns, tot
 # elementLines -> lista de coordenadas para linhas de elementos
 def subImagens(img, tColumns, tLines, factor, pixFactor, dFactor, nomeArquivo):
     global __path_file_name
+    start = time.perf_counter()
     imgProcess = img.copy()
     results_folder_path = Path(os.getcwd(), 'results')
     # Create a new results directory because it does not exist
@@ -219,6 +220,8 @@ def subImagens(img, tColumns, tLines, factor, pixFactor, dFactor, nomeArquivo):
     resultado_img_path = Path(file_path_results, 'imagem_processada_final.png')
     cv2.imwrite(str(resultado_img_path), dispImage)
     print(f"Imagem final salva em: {resultado_img_path}")
+    end = time.perf_counter()
+    print(f"[subImagens - COM paralelismo] Tempo total: {end - start:.2f}s")
 
 def process(frame, factor, pixFactor, egg_num, path_file_name, egg_folder_fit_plot_path):
 
