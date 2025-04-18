@@ -8,4 +8,5 @@ exclude =
     venv,
     .venv,
     .idea,
-    Lib
+    Lib,
+    results

@@ -30,10 +30,10 @@ def cpu_process_egg(job):
     """
     egg_num, rec_bytes, shape, l0, l1, c0, c1, pixFactor = job
     rec = np.frombuffer(rec_bytes, dtype=np.uint8).reshape(shape)
-    # Chama a função de cálculo “puro” (sem I/O interno)
-    original, A, B, C, D, chosen_vol, chosen_area, x_data, y_data = \
-        process(rec, 1, pixFactor, None, None, None)
-    return egg_num, l0, l1, c0, c1, (original, A, B, C, D, chosen_vol, chosen_area, x_data, y_data)
+    out = process(rec, 1, pixFactor, None, None, None)
+    # agora out inclui também pAi, pAf, pBi, pBf
+    original, A, B, C, D, chosen_vol, chosen_area, x_data, y_data, pAi, pAf, pBi, pBf = out
+    return egg_num, l0, l1, c0, c1, (original, A, B, C, D, chosen_vol, chosen_area, x_data, y_data, pAi, pAf, pBi, pBf)
 
 def check_and_create_directory_if_not_exist(path_directory):
     if not os.path.exists(path_directory):
@@ -91,6 +91,7 @@ def drawLines(image, calibrationLine, tempLines, elementLines, totalColumns, tot
 # temLines -> lista de coordenadas para linhas temp
 # elementLines -> lista de coordenadas para linhas de elementos
 def subImagens(img, tColumns, tLines, factor, pixFactor, dFactor, nomeArquivo):
+    t0 = time.perf_counter()
     """
     1) monta a lista de jobs (imagem, coordenadas, pixFactor)
     2) paraleliza SÓ cpu_process_egg (sem I/O interno)
@@ -101,17 +102,22 @@ def subImagens(img, tColumns, tLines, factor, pixFactor, dFactor, nomeArquivo):
        - atualiza Excel (create_sheet)
        - compõe imagem final
     """
+
     imgProcess = img.copy()
     posEggs = findeggs(img)
+
+    # inicializa limites para recorte final
+    lMin, cMin = img.shape[0], img.shape[1]
+    lMax, cMax = 0, 0
 
     # 2.1) montar jobs
     jobs = []
     for n, egg in enumerate(posEggs, 1):
-        _, lin, x, y, w, h = egg
-        l0 = int(lin - round(h*0.075))
-        l1 = int(lin + round(h*1.075))
-        c0 = int(x   - round(w*0.075))
-        c1 = int(x   + round(w*1.075))
+        _, _, col, lin, larg, alt = egg
+        l0 = int(lin - round(alt * 0.075))
+        l1 = int(lin + round(alt * 1.075))
+        c0 = int(col - round(larg * 0.075))
+        c1 = int(col + round(larg * 1.075))
         rec = img[l0:l1, c0:c1].copy()
         jobs.append((n, rec.tobytes(), rec.shape, l0, l1, c0, c1, pixFactor))
 
@@ -130,12 +136,25 @@ def subImagens(img, tColumns, tLines, factor, pixFactor, dFactor, nomeArquivo):
 
     # 2.4) TODO o I/O ocorre AQUI, sequencialmente
     for egg_num, l0, l1, c0, c1, out in results:
-        img_proc, A, B, C, D, _, _, x_data, y_data = out
+        img_proc, A, B, C, D, vol, area, x_data, y_data, pAi, pAf, pBi, pBf = out
 
         # --- 2.4.1) PNG e .dad -----------------------
         fn_png = processed / f'{egg_num}.png'
         cv2.imwrite(str(fn_png), img_proc)
-        rel.write(f"{fn_png},{A},{B},{C},{D},0,0\n")  # volumes vão ser recalculados abaixo
+
+        # vamos calcular vFormulaArea e vFormulaVolume:
+        try:
+            termo1 = math.acos((B/2)/D) * (D**2/math.sqrt(D**2-(B/2)**2))
+            termo2 = math.acos((B/2)/C) * (C**2/math.sqrt(C**2-(B/2)**2))
+            vFormulaArea = 2*math.pi*(B/2)**2 + math.pi*(B/2)*(termo1+termo2)
+        except ValueError:
+            vFormulaArea = 1
+        try:
+            vFormulaVolume = (B/2)**2 * ((2*math.pi)/3) * (D + C)
+        except ValueError:
+            vFormulaVolume = 1
+
+        rel.write(f"{fn_png},{A},{B},{C},{D},{vol},{area},{vFormulaArea},{vFormulaVolume}\n")
 
         # --- 2.4.2) CRIA SUB‑PASTA por ovo ------------
         egg_plots = plots / str(egg_num)
@@ -151,29 +170,51 @@ def subImagens(img, tColumns, tLines, factor, pixFactor, dFactor, nomeArquivo):
             nomeArquivo, egg_num, egg_plots
         )
 
-        # --- 2.4.4) calcular volumes + áreas ---------
-        # volume “antigo” sem ajuste
+        # 4.4) grava imagem rotacionada, usando os pontos pAi…pBf
+        rec = img[l0:l1, c0:c1]
+        cSEx = int(min(pAi[0], pAf[0], pBi[0], pBf[0]))
+        cSEy = int(min(pAi[1], pAf[1], pBi[1], pBf[1]))
+        cIDx = int(max(pAi[0], pAf[0], pBi[0], pBf[0]))
+        cIDy = int(max(pAi[1], pAf[1], pBi[1], pBf[1]))
+        fn_rot = processed / f'rotate_{egg_num}.png'
+        cv2.imwrite(str(fn_rot), rec[cSEx:cIDx, cSEy:cIDy])
+
+        # 4.5) atualiza Excel
+        # monta volume_results: 'Antigo' + cada ajuste
         old_slices = dict(zip(x_data, y_data))
         oldV, oldA = calcVolume(old_slices, pixFactor)
-        volume_results = {'Antigo': (oldV, oldA)}
-        # volumes por polinômio
-        for func, slice_dict in fits.items():
-            v, a = calcVolume(slice_dict, pixFactor)
-            volume_results[func] = (v, a)
+        volume_results = {'Antigo':(oldV, oldA)}
+        for func, slice_d in fits.items():
+            vv, aa = calcVolume(slice_d, pixFactor)
+            volume_results[func] = (vv, aa)
 
-        # --- 2.4.5) Excel ----------------------------
         create_sheet(egg_plots, str(egg_num), volume_results, errs)
 
         # --- 2.4.6) cola no mosaico final ------------
         imgProcess[l0:l1, c0:c1] = img_proc
+        lMin = min(lMin, l0)
+        cMin = min(cMin, c0)
+        lMax = max(lMax, l1)
+        cMax = max(cMax, c1)
 
     rel.close()
 
-    # 2.5) salva resultado completo
-    final_fn = root/'imagem_processada_final.png'
-    cv2.imwrite(str(final_fn), imgProcess)
-    print("Processamento concluído em:", root)
+    # recorta apenas a área com ovos
+    if lMax > lMin and cMax > cMin:
+        rec = imgProcess[lMin:lMax, cMin:cMax]
+    else:
+        rec = imgProcess  # fallback, tudo
+    tL, tC, _ = adjustImageDimension(rec)
+    if tL and tC:
+        disp = cv2.resize(rec, (tC, tL), interpolation=cv2.INTER_LINEAR)
+    else:
+        disp = rec
 
+    # 2.7) **salva o mosaico redimensionado** (e não o imgProcess gigante)
+    final_fn = root / 'imagem_processada_final.png'
+    cv2.imwrite(str(final_fn), disp)
+    print("Processamento concluído em:", root)
+    print(f"subImagens demorou: {time.perf_counter() - t0:.2f}s")
 
 def process(frame, factor, pixFactor, egg_num, path_file_name, egg_folder_fit_plot_path):
 
@@ -321,7 +362,7 @@ def process(frame, factor, pixFactor, egg_num, path_file_name, egg_folder_fit_pl
     # Como removemos o bloco acima, precisamos definir defaults para não dar NameError:
     chosen_volume = 0.0
     chosen_area   = 0.0
-
+    pAi, pAf, pBi, pBf = pt1, pt2, pt3, pt4
     # Desenha valores A, B, C, D e V
     A *= pixFactor; B *= pixFactor; C *= pixFactor; D *= pixFactor
     cv2.putText(original, f'A: {A:.3f}', (original.shape[1]-150,  30), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (47,141,255), 1)
@@ -331,9 +372,7 @@ def process(frame, factor, pixFactor, egg_num, path_file_name, egg_folder_fit_pl
     cv2.putText(original, f'V: {chosen_volume:.3f}', (original.shape[1]-150,110), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (30,105,210),1)
 
     # retorna a tupla completa de dados e os vetores xdata, ydata para o ajuste ficar fora daqui
-    return original, A, B, C, D, chosen_volume, chosen_area, xdata, ydata
-
-
+    return original, A, B, C, D, chosen_volume, chosen_area, xdata, ydata, pAi, pAf, pBi, pBf
 
 # Function to return the intersection between two lines
 def lineLineIntersection(A, B, C, D):

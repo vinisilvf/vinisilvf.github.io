@@ -110,8 +110,10 @@ def show_interactive_menu(): #Função para exibir o menu interativo
         global pixFactor, nomeArquivo, fullImage, originalImage, totalLines, totalColumns, rFactor, dFactor, elementLines
         pixFactor = 0.25041736227045075125208681135225
         #teste nome arquivo
+        t0 = time.perf_counter()
         print("Nome Arquivo antes da chamada de processamento ==> ", nomeArquivo)
         Processamento.subImagens(fullImage, totalColumns, totalLines, rFactor, pixFactor, dFactor, nomeArquivo)
+        print(f"Tempo total de subImagens: {time.perf_counter() - t0:.2f}s")
         update_image_cache()
         cv2.namedWindow("Window")  # Cria a janela
         cv2.setMouseCallback("Window", mouseActions)
