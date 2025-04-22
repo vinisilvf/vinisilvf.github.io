@@ -19,6 +19,17 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
 import time
+from functools import wraps
+
+def timing(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        result = func(*args, **kwargs)
+        end = time.perf_counter()
+        print(f"[TIMER] {func.__name__} levou {end-start:.3f}s")
+        return result
+    return wrapper
 
 # --------------------------------------------------------------------
 # 1) CPU‑only: roda em subprocessos, sem NENHUM I/O
@@ -90,6 +101,7 @@ def drawLines(image, calibrationLine, tempLines, elementLines, totalColumns, tot
 # variaveis: image -> imagem da qual as subimagens serão extraidas
 # temLines -> lista de coordenadas para linhas temp
 # elementLines -> lista de coordenadas para linhas de elementos
+@timing
 def subImagens(img, tColumns, tLines, factor, pixFactor, dFactor, nomeArquivo):
     t0 = time.perf_counter()
     """
@@ -243,7 +255,6 @@ def process(frame, factor, pixFactor, egg_num, path_file_name, egg_folder_fit_pl
         ),
         np.bitwise_and(data[:,:,2] >= channel3Min, data[:,:,2] <= channel3Max)
     )
-    # REMOVIDO: data[data is True] = 1 / data[data is False] = 0
     data[data > 0] = 1
     data = median(data, disk(3))
     data[data > 0] = 1
@@ -359,7 +370,6 @@ def process(frame, factor, pixFactor, egg_num, path_file_name, egg_folder_fit_pl
     # create_sheet(egg_folder_fit_plot_path, egg_num, volume_results, curve_fit_errors)
     # =======================
 
-    # Como removemos o bloco acima, precisamos definir defaults para não dar NameError:
     chosen_volume = 0.0
     chosen_area   = 0.0
     pAi, pAf, pBi, pBf = pt1, pt2, pt3, pt4
