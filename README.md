@@ -4,4 +4,4 @@ GUI - Interface Grafica
 
 Exemplo de cartela utilizada para analise do processamento paralelo
 
-<img width="700" height="600" alt="cartela" src="https://github.com/user-attachments/assets/2c738b64-f80b-4a6a-a924-60e1c44c461e" />
+<img width="1031" height="800" alt="Captura de tela 2025-07-14 164457" src="https://github.com/user-attachments/assets/2e1cca7e-816c-4752-8b38-2abc625e9731" />
